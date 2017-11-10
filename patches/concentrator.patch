@@ -1,0 +1,2921 @@
+diff -urN board_palna.c concentrator_new/board_palna.c
+--- board_palna.c	1969-12-31 18:00:00.000000000 -0600
++++ concentrator_new/board_palna.c	2017-07-07 13:15:02.843061400 -0500
+@@ -0,0 +1,99 @@
++/******************************************************************************
++
++ @file board_palna.c
++
++ @brief This file contains the interface to the CC1310-CC1190 LP PA/LNA
++
++ Group: WCS LPC
++ $Target Device: DEVICES $
++
++ ******************************************************************************
++ $License: BSD3 2016 $
++ ******************************************************************************
++ $Release Name: PACKAGE NAME $
++ $Release Date: PACKAGE RELEASE DATE $
++ *****************************************************************************/
++
++/******************************************************************************
++ Includes
++ *****************************************************************************/
++
++#include <xdc/std.h>
++
++#include <ti/drivers/PIN.h>
++#include <ti/drivers/pin/PINCC26XX.h>
++
++#include "board.h"
++#include "board_palna.h"
++
++/******************************************************************************
++ Constants
++ *****************************************************************************/
++
++#define Board_DIO28_HGM     IOID_28
++#define Board_DIO29_LNA     IOID_29
++#define Board_DIO30_PA      IOID_30
++
++/******************************************************************************
++ Typedefs
++ *****************************************************************************/
++
++/******************************************************************************
++ Local Variables
++ *****************************************************************************/
++
++/*
++ SensorTag LED has exactly the same attributes as that of
++ BoardGpioInitTable[]. There is no need to create a new one.
++ */
++static PIN_Config palnaPinTable[] =
++    {
++        Board_DIO28_HGM | PIN_GPIO_OUTPUT_EN | PIN_GPIO_HIGH | PIN_PUSHPULL
++            | PIN_DRVSTR_MAX, /* High Gain Mode by Default */
++        Board_DIO29_LNA | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL
++            | PIN_DRVSTR_MAX, /* LNA Off by Default */
++        Board_DIO30_PA  | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL
++            | PIN_DRVSTR_MAX, /* PA Off by Default */	
++        PIN_TERMINATE /* Terminate list     */
++    };
++
++/* PA/LNA pin state */
++static PIN_State palnaPinState;
++
++/* PA/LNA Pin Handle */
++static PIN_Handle palnaPinHandle;
++
++/******************************************************************************
++ Local Function Prototypes
++ *****************************************************************************/
++
++/******************************************************************************
++ Public Functions
++ *****************************************************************************/
++
++/*!
++ Initialize PA/LNA
++
++ Public function defined in board_palna.h
++ */
++void Board_Palna_initialize(uint32_t hgm)
++{
++	if (hgm)
++	{
++		if (!palnaPinHandle)
++		{
++			/* Open PA/LNA PIN driver */
++			palnaPinHandle = PIN_open(&palnaPinState, palnaPinTable);
++			
++			/* Set IO muxing for RFC GPOs */
++			PINCC26XX_setMux(palnaPinHandle, Board_DIO29_LNA, IOC_PORT_RFC_GPO0);
++			PINCC26XX_setMux(palnaPinHandle, Board_DIO30_PA, IOC_PORT_RFC_GPO1);
++		}
++		
++		PIN_setOutputValue(palnaPinHandle, Board_DIO28_HGM, (hgm & 1));
++			
++	}
++}
++
++
++
+diff -urN board_palna.h concentrator_new/board_palna.h
+--- board_palna.h	1969-12-31 18:00:00.000000000 -0600
++++ concentrator_new/board_palna.h	2017-07-07 13:15:02.845561400 -0500
+@@ -0,0 +1,47 @@
++/******************************************************************************
++
++ @file board_palna.h
++
++ @brief This file contains the PA/LNA Service definitions and prototypes.
++
++ Group: WCS LPC
++ $Target Device: DEVICES $
++
++ ******************************************************************************
++ $License: BSD3 2016 $
++ ******************************************************************************
++ $Release Name: PACKAGE NAME $
++ $Release Date: PACKAGE RELEASE DATE $
++ *****************************************************************************/
++#ifndef BOARD_PALNA_H
++#define BOARD_PALNA_H
++
++/******************************************************************************
++ Includes
++ *****************************************************************************/
++
++#ifdef __cplusplus
++extern "C"
++{
++#endif
++
++/******************************************************************************
++ Typedefs
++ *****************************************************************************/
++
++
++
++/******************************************************************************
++ API Functions
++ *****************************************************************************/
++
++/*!
++ * @brief   Initialize PA/LNA
++ */
++void Board_Palna_initialize(uint32_t hgm);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* BOARD_PALNA_H */
+diff -urN ConcentratorGPS.c concentrator_new/ConcentratorGPS.c
+--- ConcentratorGPS.c	1969-12-31 18:00:00.000000000 -0600
++++ concentrator_new/ConcentratorGPS.c	2017-07-07 13:15:02.850561400 -0500
+@@ -0,0 +1,146 @@
++/*
++ * Copyright (c) 2015-2016, Texas Instruments Incorporated
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * *  Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ *
++ * *  Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * *  Neither the name of Texas Instruments Incorporated nor the names of
++ *    its contributors may be used to endorse or promote products derived
++ *    from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/***** Includes *****/
++
++#include <xdc/std.h>
++#include <xdc/runtime/System.h>
++
++#include <ti/sysbios/BIOS.h>
++
++#include <ti/sysbios/knl/Task.h>
++#include <ti/sysbios/knl/Semaphore.h>
++#include <ti/sysbios/knl/Event.h>
++
++/* Drivers */
++#include <ti/drivers/PIN.h>
++#include <ti/display/Display.h>
++#include <ti/display/DisplayExt.h>
++
++/* Board Header files */
++#include "Board.h"
++
++#include "ConcentratorRadioTask.h"
++#include "ConcentratorTask.h"
++#include "RadioProtocol.h"
++
++#include <stdlib.h>
++#include <ti/drivers/UART.h>
++
++#include "ConcentratorGPS.h"
++
++/***** Variable declarations *****/
++UART_Handle uart;
++UART_Params uartParams;
++
++void gpsPacketReceive(EasyLink_RxPacket* rxPacket, union ConcentratorPacket* latestPacket);
++
++/***** Function definitions *****/
++void gpsUartInit(void)
++{
++    /* Create a UART with data processing off. */
++    UART_Params_init(&uartParams);
++    uartParams.writeDataMode = UART_DATA_BINARY;
++    uartParams.readDataMode = UART_DATA_BINARY;
++    uartParams.readReturnMode = UART_RETURN_FULL;
++    uartParams.readEcho = UART_ECHO_OFF;
++    uartParams.baudRate = 115200;
++
++    uart = UART_open(Board_UART0, &uartParams);
++
++    if (uart == NULL) {
++        /* UART_open() failed */
++        while (1);
++    }
++}
++
++void updateGpsNode(struct gpsSensorNode* node) {
++    uint8_t i;
++    for (i = 0; i < CONCENTRATOR_MAX_NODES; i++) {
++        if (knownGpsSensorNodes[i].address == node->address)
++        {
++            knownGpsSensorNodes[i].gpsData = node->gpsData;
++            knownGpsSensorNodes[i].latestRssi = node->latestRssi;
++            break;
++        }
++    }
++}
++
++void addNewGpsNode(struct gpsSensorNode* node) {
++    *lastAddedGpsSensorNode = *node;
++
++    /* Increment and wrap */
++    lastAddedGpsSensorNode++;
++    if (lastAddedGpsSensorNode > &knownGpsSensorNodes[CONCENTRATOR_MAX_NODES-1])
++    {
++        lastAddedGpsSensorNode = knownGpsSensorNodes;
++    }
++}
++
++void gpsUpdatePC(struct gpsSensorNode* node)
++{
++    char s = '$';
++    char n = '\n';
++    UART_write(uart, &s, 1);
++    UART_write(uart, &node->address, 1);
++    UART_write(uart, &node->latestRssi, 1);
++    UART_write(uart, &node->gpsData.lat.DM, 2);
++    UART_write(uart, &node->gpsData.lat.m, 3);
++    UART_write(uart, &node->gpsData.lng.DM, 2);
++    UART_write(uart, &node->gpsData.lng.m, 3);
++    UART_write(uart, &node->gpsData.alt.A, 2);
++    UART_write(uart, &node->gpsData.alt.a, 1);
++    UART_write(uart, &node->gpsData.time.h, 1);
++    UART_write(uart, &node->gpsData.time.m, 1);
++    UART_write(uart, &node->gpsData.time.s, 1);
++    UART_write(uart, &n, 1);
++}
++
++void gpsPacketReceive(EasyLink_RxPacket* rxPacket, union ConcentratorPacket* latestPacket)
++{
++    /* Save packet */
++    latestPacket->header.sourceAddress = rxPacket->payload[0];
++    latestPacket->header.packetType = rxPacket->payload[1];
++    latestPacket->gpsSensorPacket.gpsData.lat.DM = (rxPacket->payload[2] << 8 | rxPacket->payload[3]);
++    latestPacket->gpsSensorPacket.gpsData.lat.m = (rxPacket->payload[4] << 16 |
++                                                     rxPacket->payload[5] << 8  |
++                                                     rxPacket->payload[6]);
++    latestPacket->gpsSensorPacket.gpsData.lng.DM = (rxPacket->payload[7] << 8 | rxPacket->payload[8]);
++    latestPacket->gpsSensorPacket.gpsData.lng.m = (rxPacket->payload[9] << 16 |
++                                                     rxPacket->payload[10] << 8  |
++                                                     rxPacket->payload[11]);
++    latestPacket->gpsSensorPacket.gpsData.alt.A = (rxPacket->payload[12] << 8 | rxPacket->payload[13]);
++    latestPacket->gpsSensorPacket.gpsData.alt.a = rxPacket->payload[14];
++    latestPacket->gpsSensorPacket.gpsData.time.h = rxPacket->payload[15];
++    latestPacket->gpsSensorPacket.gpsData.time.m = rxPacket->payload[16];
++    latestPacket->gpsSensorPacket.gpsData.time.s = rxPacket->payload[17];
++}
+diff -urN ConcentratorGPS.h concentrator_new/ConcentratorGPS.h
+--- ConcentratorGPS.h	1969-12-31 18:00:00.000000000 -0600
++++ concentrator_new/ConcentratorGPS.h	2017-07-07 13:15:02.853061400 -0500
+@@ -0,0 +1,137 @@
++/*
++ * Copyright (c) 2015-2016, Texas Instruments Incorporated
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * *  Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ *
++ * *  Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * *  Neither the name of Texas Instruments Incorporated nor the names of
++ *    its contributors may be used to endorse or promote products derived
++ *    from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef TASKS_CONCENTRATORGPS_H_
++#define TASKS_CONCENTRATORGPS_H_
++
++#include "stdint.h"
++#include "ConcentratorRadioTask.h"
++#include "RadioProtocol.h"
++#include "ConcentratorTask.h"
++
++struct gpsDataUART_s {
++    struct ulat_s {
++        char D[4];
++        char M[10];
++        char dir;
++    } lat;
++
++    struct ulng_s {
++        char D[4];
++        char M[9];
++        char dir;
++    } lng;
++
++    struct ualt_s
++    {
++        char A[8];   // altitude
++        char a[4];
++    } alt;
++
++    struct utime_s {
++        char h[4];
++        char m[4];
++        char s[4];
++    } time;
++};
++
++///* GPS Lat/Lng data in Degrees Minutes (DM), where D is signed */
++//struct gpsData_s {
++//    struct glat_s   // DM = [0][1:3]
++//    {
++//        int8_t D;
++//        uint32_t M;
++//    } lat;
++//    struct glng_s  // DM = [0:1][2:4]
++//    {
++//        int16_t D;
++//        uint32_t M;
++//    } lng;
++//    struct time_s  // h.m.s (UTC) = [0].[1].[2]
++//    {
++//        uint8_t h;
++//        uint8_t m;
++//        uint8_t s;
++//    } time;
++//};
++
++/* GPS Lat/Lng data in Degrees Minutes (DM), where D is signed */
++struct gpsData_s {
++    struct lat_s   // DM.m = [0:1].[2:4]
++    {
++        int16_t DM;
++        uint32_t m;
++    } lat;
++
++    struct lng_s  // DM = [0:1].[2:4]
++    {
++        int16_t DM;
++        uint32_t m;
++    } lng;
++
++    struct alt_s
++    {
++        uint16_t A; // altitude: A.a Meters
++        uint8_t a;
++    } alt;
++
++    struct time_s  // h.m.s (UTC) = [0].[1].[2]
++    {
++        uint8_t h;
++        uint8_t m;
++        uint8_t s;
++    } time;
++};
++
++struct gpsSensorPacket_s {
++    struct PacketHeader header;
++    struct gpsData_s gpsData;
++};
++
++struct gpsSensorNode {
++    uint8_t address;
++    struct gpsData_s gpsData;
++    int8_t latestRssi;
++};
++
++extern struct gpsSensorNode latestActiveGpsSensorNode;
++extern struct gpsSensorNode knownGpsSensorNodes[];
++extern struct gpsSensorNode* lastAddedGpsSensorNode;
++
++void gpsUartInit(void);
++void addNewGpsNode(struct gpsSensorNode* node);
++void updateGpsNode(struct gpsSensorNode* node);
++void gpsUpdatePC(struct gpsSensorNode* node);
++
++#endif /* TASKS_CONCENTRATORGPS_H_ */
++
++
+diff -urN ConcentratorRadioTask.c concentrator_new/ConcentratorRadioTask.c
+--- ConcentratorRadioTask.c	1969-12-31 18:00:00.000000000 -0600
++++ concentrator_new/ConcentratorRadioTask.c	2017-07-07 16:02:31.929194300 -0500
+@@ -0,0 +1,278 @@
++/*
++ * Copyright (c) 2015-2016, Texas Instruments Incorporated
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * *  Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ *
++ * *  Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * *  Neither the name of Texas Instruments Incorporated nor the names of
++ *    its contributors may be used to endorse or promote products derived
++ *    from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/***** Includes *****/
++#include <xdc/std.h>
++#include <xdc/runtime/System.h>
++
++#include "ConcentratorRadioTask.h"
++
++#include <ti/sysbios/BIOS.h>
++
++#include <ti/sysbios/knl/Task.h>
++#include <ti/sysbios/knl/Semaphore.h>
++#include <ti/sysbios/knl/Event.h>
++
++/* Drivers */
++#include <ti/drivers/rf/RF.h>
++#include <ti/drivers/PIN.h>
++
++/* Board Header files */
++#include "Board.h"
++
++#include "easylink/EasyLink.h"
++#include "RadioProtocol.h"
++
++#include "ConcentratorGPS.h"
++
++
++/***** Defines *****/
++#define CONCENTRATORRADIO_TASK_STACK_SIZE 1024
++#define CONCENTRATORRADIO_TASK_PRIORITY   3
++
++#define RADIO_EVENT_ALL                  0xFFFFFFFF
++#define RADIO_EVENT_VALID_PACKET_RECEIVED      (uint32_t)(1 << 0)
++#define RADIO_EVENT_INVALID_PACKET_RECEIVED (uint32_t)(1 << 1)
++
++#define CONCENTRATORRADIO_MAX_RETRIES 2
++#define NORERADIO_ACK_TIMEOUT_TIME_MS (160)
++
++
++#define CONCENTRATOR_ACTIVITY_LED Board_PIN_LED0
++
++/***** Type declarations *****/
++
++
++
++/***** Variable declarations *****/
++static Task_Params concentratorRadioTaskParams;
++Task_Struct concentratorRadioTask; /* not static so you can see in ROV */
++static uint8_t concentratorRadioTaskStack[CONCENTRATORRADIO_TASK_STACK_SIZE];
++Event_Struct radioOperationEvent;  /* not static so you can see in ROV */
++static Event_Handle radioOperationEventHandle;
++
++
++
++static ConcentratorRadio_PacketReceivedCallback packetReceivedCallback;
++static union ConcentratorPacket latestRxPacket;
++static EasyLink_TxPacket txPacket;
++static struct AckPacket ackPacket;
++static uint8_t concentratorAddress;
++static int8_t latestRssi;
++
++
++/***** Prototypes *****/
++static void concentratorRadioTaskFunction(UArg arg0, UArg arg1);
++static void rxDoneCallback(EasyLink_RxPacket * rxPacket, EasyLink_Status status);
++static void notifyPacketReceived(union ConcentratorPacket* latestRxPacket);
++static void sendAck(uint8_t latestSourceAddress);
++extern void gpsPacketReceive(EasyLink_RxPacket* rxPacket, union ConcentratorPacket* latestPacket);
++
++/* Pin driver handle */
++static PIN_Handle ledPinHandle;
++static PIN_State ledPinState;
++
++/* Configure LED Pin */
++PIN_Config ledPinTable[] = {
++        CONCENTRATOR_ACTIVITY_LED | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,
++    PIN_TERMINATE
++};
++
++/***** Function definitions *****/
++void ConcentratorRadioTask_init(void) {
++
++    /* Open LED pins */
++    ledPinHandle = PIN_open(&ledPinState, ledPinTable);
++    if (!ledPinHandle)
++    {
++        System_abort("Error initializing board 3.3V domain pins\n");
++    }
++
++    /* Create event used internally for state changes */
++    Event_Params eventParam;
++    Event_Params_init(&eventParam);
++    Event_construct(&radioOperationEvent, &eventParam);
++    radioOperationEventHandle = Event_handle(&radioOperationEvent);
++
++    /* Create the concentrator radio protocol task */
++    Task_Params_init(&concentratorRadioTaskParams);
++    concentratorRadioTaskParams.stackSize = CONCENTRATORRADIO_TASK_STACK_SIZE;
++    concentratorRadioTaskParams.priority = CONCENTRATORRADIO_TASK_PRIORITY;
++    concentratorRadioTaskParams.stack = &concentratorRadioTaskStack;
++    Task_construct(&concentratorRadioTask, concentratorRadioTaskFunction, &concentratorRadioTaskParams, NULL);
++}
++
++void ConcentratorRadioTask_registerPacketReceivedCallback(ConcentratorRadio_PacketReceivedCallback callback) {
++    packetReceivedCallback = callback;
++}
++
++static void concentratorRadioTaskFunction(UArg arg0, UArg arg1)
++{
++    /* Initialize EasyLink */
++    if(EasyLink_init(RADIO_EASYLINK_MODULATION) != EasyLink_Status_Success) {
++        System_abort("EasyLink_init failed");
++    }
++
++
++    /* If you wish to use a frequency other than the default use
++     * the below API
++     * EasyLink_setFrequency(868000000);
++     */
++    /* Set concentrator address */;
++    concentratorAddress = RADIO_CONCENTRATOR_ADDRESS;
++    EasyLink_enableRxAddrFilter(&concentratorAddress, 1, 1);
++
++    /* Set up Ack packet */
++    ackPacket.header.sourceAddress = concentratorAddress;
++    ackPacket.header.packetType = RADIO_PACKET_TYPE_ACK_PACKET;
++
++    /* Enter receive */
++    if(EasyLink_receiveAsync(rxDoneCallback, 0) != EasyLink_Status_Success) {
++        System_abort("EasyLink_receiveAsync failed");
++    }
++
++    while (1) {
++        uint32_t events = Event_pend(radioOperationEventHandle, 0, RADIO_EVENT_ALL, BIOS_WAIT_FOREVER);
++
++        /* If valid packet received */
++        if(events & RADIO_EVENT_VALID_PACKET_RECEIVED) {
++
++            /* Send ack packet */
++            sendAck(latestRxPacket.header.sourceAddress);
++
++            /* Call packet received callback */
++            notifyPacketReceived(&latestRxPacket);
++
++            /* Go back to RX */
++            if(EasyLink_receiveAsync(rxDoneCallback, 0) != EasyLink_Status_Success) {
++                System_abort("EasyLink_receiveAsync failed");
++            }
++
++            /* toggle Activity LED */
++            PIN_setOutputValue(ledPinHandle, CONCENTRATOR_ACTIVITY_LED,
++                    !PIN_getOutputValue(CONCENTRATOR_ACTIVITY_LED));
++        }
++
++        /* If invalid packet received */
++        if(events & RADIO_EVENT_INVALID_PACKET_RECEIVED) {
++            /* Go back to RX */
++            if(EasyLink_receiveAsync(rxDoneCallback, 0) != EasyLink_Status_Success) {
++                System_abort("EasyLink_receiveAsync failed");
++            }
++        }
++    }
++}
++
++static void sendAck(uint8_t latestSourceAddress) {
++
++    /* Set destinationAdress, but use EasyLink layers destination adress capability */
++    txPacket.dstAddr[0] = latestSourceAddress;
++
++    /* Copy ACK packet to payload, skipping the destination adress byte.
++     * Note that the EasyLink API will implcitily both add the length byte and the destination address byte. */
++    memcpy(txPacket.payload, &ackPacket.header, sizeof(ackPacket));
++    txPacket.len = sizeof(ackPacket);
++
++    /* Send packet  */
++    if (EasyLink_transmit(&txPacket) != EasyLink_Status_Success)
++    {
++        System_abort("EasyLink_transmit failed");
++    }
++}
++
++static void notifyPacketReceived(union ConcentratorPacket* latestRxPacket)
++{
++    if (packetReceivedCallback)
++    {
++        packetReceivedCallback(latestRxPacket, latestRssi);
++    }
++}
++
++static void rxDoneCallback(EasyLink_RxPacket * rxPacket, EasyLink_Status status)
++{
++    union ConcentratorPacket* tmpRxPacket;
++
++    /* If we received a packet successfully */
++    if (status == EasyLink_Status_Success)
++    {
++        /* Save the latest RSSI, which is later sent to the receive callback */
++        latestRssi = (int8_t)rxPacket->rssi;
++
++        /* Check that this is a valid packet */
++        tmpRxPacket = (union ConcentratorPacket*)(rxPacket->payload);
++
++        /* If this is a known packet */
++        if (tmpRxPacket->header.packetType == RADIO_PACKET_TYPE_ADC_SENSOR_PACKET)
++        {
++            /* Save packet */
++            latestRxPacket.header.sourceAddress = rxPacket->payload[0];
++            latestRxPacket.header.packetType = rxPacket->payload[1];
++            latestRxPacket.adcSensorPacket.adcValue = (rxPacket->payload[2] << 8) | rxPacket->payload[3];
++
++            /* Signal packet received */
++            Event_post(radioOperationEventHandle, RADIO_EVENT_VALID_PACKET_RECEIVED);
++        }
++        else if (tmpRxPacket->header.packetType == RADIO_PACKET_TYPE_DM_SENSOR_PACKET)
++        {
++            /* Save packet */
++            latestRxPacket.header.sourceAddress = rxPacket->payload[0];
++            latestRxPacket.header.packetType = rxPacket->payload[1];
++            latestRxPacket.dmSensorPacket.adcValue = (rxPacket->payload[2] << 8) | rxPacket->payload[3];
++            latestRxPacket.dmSensorPacket.batt = (rxPacket->payload[4] << 8) | rxPacket->payload[5];
++            latestRxPacket.dmSensorPacket.time100MiliSec = (rxPacket->payload[6] << 24) |
++                                                           (rxPacket->payload[7] << 16) |
++                                                           (rxPacket->payload[8] << 8) |
++                                                            rxPacket->payload[9];
++            latestRxPacket.dmSensorPacket.button = rxPacket->payload[10];
++
++            /* Signal packet received */
++            Event_post(radioOperationEventHandle, RADIO_EVENT_VALID_PACKET_RECEIVED);
++        }
++        else if (tmpRxPacket->header.packetType == RADIO_PACKET_TYPE_GPS_SENSOR_PACKET)
++        {
++            gpsPacketReceive(rxPacket, &latestRxPacket);
++
++            /* Signal packet received */
++            Event_post(radioOperationEventHandle, RADIO_EVENT_VALID_PACKET_RECEIVED);
++        }
++        else
++        {
++            /* Signal invalid packet received */
++            Event_post(radioOperationEventHandle, RADIO_EVENT_INVALID_PACKET_RECEIVED);
++        }
++    }
++    else
++    {
++        /* Signal invalid packet received */
++        Event_post(radioOperationEventHandle, RADIO_EVENT_INVALID_PACKET_RECEIVED);
++    }
++}
+diff -urN ConcentratorRadioTask.h concentrator_new/ConcentratorRadioTask.h
+--- ConcentratorRadioTask.h	1969-12-31 18:00:00.000000000 -0600
++++ concentrator_new/ConcentratorRadioTask.h	2017-07-07 13:15:02.920561400 -0500
+@@ -0,0 +1,61 @@
++/*
++ * Copyright (c) 2015-2016, Texas Instruments Incorporated
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * *  Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ *
++ * *  Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * *  Neither the name of Texas Instruments Incorporated nor the names of
++ *    its contributors may be used to endorse or promote products derived
++ *    from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef TASKS_CONCENTRATORRADIOTASKTASK_H_
++#define TASKS_CONCENTRATORRADIOTASKTASK_H_
++
++#include "stdint.h"
++#include "RadioProtocol.h"
++#include "ConcentratorGPS.h"
++
++enum ConcentratorRadioOperationStatus {
++    ConcentratorRadioStatus_Success,
++    ConcentratorRadioStatus_Failed,
++    ConcentratorRadioStatus_FailedNotConnected,
++};
++
++union ConcentratorPacket {
++    struct PacketHeader header;
++    struct gpsSensorPacket_s gpsSensorPacket;
++    struct AdcSensorPacket adcSensorPacket;
++    struct DualModeSensorPacket dmSensorPacket;
++};
++
++typedef void (*ConcentratorRadio_PacketReceivedCallback)(union ConcentratorPacket* packet, int8_t rssi);
++
++/* Create the ConcentratorRadioTask and creates all TI-RTOS objects */
++void ConcentratorRadioTask_init(void);
++
++/* Register the packet received callback */
++void ConcentratorRadioTask_registerPacketReceivedCallback(ConcentratorRadio_PacketReceivedCallback callback);
++
++#endif /* TASKS_CONCENTRATORRADIOTASKTASK_H_ */
+diff -urN ConcentratorTask.c concentrator_new/ConcentratorTask.c
+--- ConcentratorTask.c	1969-12-31 18:00:00.000000000 -0600
++++ concentrator_new/ConcentratorTask.c	2017-07-07 13:15:02.950561400 -0500
+@@ -0,0 +1,298 @@
++/*
++ * Copyright (c) 2015-2016, Texas Instruments Incorporated
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * *  Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ *
++ * *  Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * *  Neither the name of Texas Instruments Incorporated nor the names of
++ *    its contributors may be used to endorse or promote products derived
++ *    from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/***** Includes *****/
++
++#include <xdc/std.h>
++#include <xdc/runtime/System.h>
++
++#include <ti/sysbios/BIOS.h>
++
++#include <ti/sysbios/knl/Task.h>
++#include <ti/sysbios/knl/Semaphore.h>
++#include <ti/sysbios/knl/Event.h>
++
++/* Drivers */
++#include <ti/drivers/PIN.h>
++#include <ti/display/Display.h>
++#include <ti/display/DisplayExt.h>
++
++/* Board Header files */
++#include "Board.h"
++
++#include "ConcentratorRadioTask.h"
++#include "ConcentratorTask.h"
++#include "RadioProtocol.h"
++
++#include "ConcentratorGPS.h"
++
++/***** Defines *****/
++#define CONCENTRATOR_TASK_STACK_SIZE 1024
++#define CONCENTRATOR_TASK_PRIORITY   3
++
++#define CONCENTRATOR_EVENT_ALL                         0xFFFFFFFF
++#define CONCENTRATOR_EVENT_NEW_ADC_SENSOR_VALUE    (uint32_t)(1 << 0)
++#define CONCENTRATOR_EVENT_NEW_GPS_SENSOR_VALUE     (uint32_t)(1 << 1)
++
++#define CONCENTRATOR_DISPLAY_LINES 8
++
++/***** Type declarations *****/
++struct AdcSensorNode {
++    uint8_t address;
++    uint16_t latestAdcValue;
++    uint8_t button;
++    int8_t latestRssi;
++};
++
++/***** Variable declarations *****/
++static Task_Params concentratorTaskParams;
++Task_Struct concentratorTask;    /* not static so you can see in ROV */
++static uint8_t concentratorTaskStack[CONCENTRATOR_TASK_STACK_SIZE];
++Event_Struct concentratorEvent;  /* not static so you can see in ROV */
++static Event_Handle concentratorEventHandle;
++static struct AdcSensorNode latestActiveAdcSensorNode;
++struct AdcSensorNode knownSensorNodes[CONCENTRATOR_MAX_NODES];
++static struct AdcSensorNode* lastAddedSensorNode = knownSensorNodes;
++static Display_Handle hDisplayLcd;
++static Display_Handle hDisplaySerial;
++
++struct gpsSensorNode latestActiveGpsSensorNode;
++struct gpsSensorNode knownGpsSensorNodes[CONCENTRATOR_MAX_NODES];
++struct gpsSensorNode* lastAddedGpsSensorNode = knownGpsSensorNodes;
++
++
++/***** Prototypes *****/
++static void concentratorTaskFunction(UArg arg0, UArg arg1);
++static void packetReceivedCallback(union ConcentratorPacket* packet, int8_t rssi);
++static void updateLcd(void);
++static void addNewNode(struct AdcSensorNode* node);
++static void updateNode(struct AdcSensorNode* node);
++static uint8_t isKnownNodeAddress(uint8_t address);
++
++/***** Function definitions *****/
++void ConcentratorTask_init(void) {
++
++    /* Create event used internally for state changes */
++    Event_Params eventParam;
++    Event_Params_init(&eventParam);
++    Event_construct(&concentratorEvent, &eventParam);
++    concentratorEventHandle = Event_handle(&concentratorEvent);
++
++    /* Create the concentrator radio protocol task */
++    Task_Params_init(&concentratorTaskParams);
++    concentratorTaskParams.stackSize = CONCENTRATOR_TASK_STACK_SIZE;
++    concentratorTaskParams.priority = CONCENTRATOR_TASK_PRIORITY;
++    concentratorTaskParams.stack = &concentratorTaskStack;
++    Task_construct(&concentratorTask, concentratorTaskFunction, &concentratorTaskParams, NULL);
++
++    gpsUartInit();
++}
++
++static void concentratorTaskFunction(UArg arg0, UArg arg1)
++{
++    /* Initialize display and try to open both UART and LCD types of display. */
++    Display_Params params;
++    Display_Params_init(&params);
++    params.lineClearMode = DISPLAY_CLEAR_BOTH;
++
++    /* Open both an available LCD display and an UART display.
++     * Whether the open call is successful depends on what is present in the
++     * Display_config[] array of the board file.
++     *
++     * Note that for SensorTag evaluation boards combined with the SHARP96x96
++     * Watch DevPack, there is a pin conflict with UART such that one must be
++     * excluded, and UART is preferred by default. To display on the Watch
++     * DevPack, add the precompiler define BOARD_DISPLAY_EXCLUDE_UART.
++     */
++    hDisplayLcd = Display_open(Display_Type_LCD, &params);
++    hDisplaySerial = Display_open(Display_Type_UART, &params);
++
++    /* Check if the selected Display type was found and successfully opened */
++    if (hDisplaySerial)
++    {
++        Display_printf(hDisplaySerial, 0, 0, "Waiting for nodes...");
++    }
++
++    /* Check if the selected Display type was found and successfully opened */
++    if (hDisplayLcd)
++    {
++        Display_printf(hDisplayLcd, 0, 0, "Waiting for nodes...");
++    }
++
++    /* Register a packet received callback with the radio task */
++    ConcentratorRadioTask_registerPacketReceivedCallback(packetReceivedCallback);
++
++    /* Enter main task loop */
++    while(1) {
++        /* Wait for event */
++        uint32_t events = Event_pend(concentratorEventHandle, 0, CONCENTRATOR_EVENT_ALL, BIOS_WAIT_FOREVER);
++
++        /* If we got a new ADC sensor value */
++        if(events & CONCENTRATOR_EVENT_NEW_ADC_SENSOR_VALUE) {
++            /* If we knew this node from before, update the value */
++            if(isKnownNodeAddress(latestActiveAdcSensorNode.address)) {
++                updateNode(&latestActiveAdcSensorNode);
++            }
++            else {
++                /* Else add it */
++                addNewNode(&latestActiveAdcSensorNode);
++            }
++
++            /* Update the values on the LCD */
++            updateLcd();
++        }
++
++        /* If we got a new ADC sensor value */
++        if(events & CONCENTRATOR_EVENT_NEW_GPS_SENSOR_VALUE) {
++            /* If we knew this node from before, update the value */
++            if(isKnownNodeAddress(latestActiveGpsSensorNode.address)) {
++                updateGpsNode(&latestActiveGpsSensorNode);
++            }
++            else {
++                /* Else add it */
++                addNewGpsNode(&latestActiveGpsSensorNode);
++            }
++
++            /* Update the values on the LCD */
++            gpsUpdatePC(&latestActiveGpsSensorNode);
++        }
++    }
++}
++
++static void packetReceivedCallback(union ConcentratorPacket* packet, int8_t rssi)
++{
++    /* If we recived an ADC sensor packet, for backward compatibility */
++    if (packet->header.packetType == RADIO_PACKET_TYPE_ADC_SENSOR_PACKET)
++    {
++        /* Save the values */
++        latestActiveAdcSensorNode.address = packet->header.sourceAddress;
++        latestActiveAdcSensorNode.latestAdcValue = packet->adcSensorPacket.adcValue;
++        latestActiveAdcSensorNode.button = 0; //no button value in ADC packet
++        latestActiveAdcSensorNode.latestRssi = rssi;
++
++        Event_post(concentratorEventHandle, CONCENTRATOR_EVENT_NEW_ADC_SENSOR_VALUE);
++    }
++    /* If we recived an DualMode ADC sensor packet*/
++    else if(packet->header.packetType == RADIO_PACKET_TYPE_DM_SENSOR_PACKET)
++    {
++
++        /* Save the values */
++        latestActiveAdcSensorNode.address = packet->header.sourceAddress;
++        latestActiveAdcSensorNode.latestAdcValue = packet->dmSensorPacket.adcValue;
++        latestActiveAdcSensorNode.button = packet->dmSensorPacket.button;
++        latestActiveAdcSensorNode.latestRssi = rssi;
++
++        Event_post(concentratorEventHandle, CONCENTRATOR_EVENT_NEW_ADC_SENSOR_VALUE);
++    }
++    else if(packet->header.packetType == RADIO_PACKET_TYPE_GPS_SENSOR_PACKET)
++    {
++
++        /* Save the values */
++        latestActiveGpsSensorNode.address = packet->header.sourceAddress;
++        latestActiveGpsSensorNode.gpsData = packet->gpsSensorPacket.gpsData;
++        latestActiveGpsSensorNode.latestRssi = rssi;
++
++        Event_post(concentratorEventHandle, CONCENTRATOR_EVENT_NEW_GPS_SENSOR_VALUE);
++    }
++}
++
++static uint8_t isKnownNodeAddress(uint8_t address) {
++    uint8_t found = 0;
++    uint8_t i;
++    for (i = 0; i < CONCENTRATOR_MAX_NODES; i++)
++    {
++        if (knownSensorNodes[i].address == address)
++        {
++            found = 1;
++            break;
++        }
++    }
++    return found;
++}
++
++static void updateNode(struct AdcSensorNode* node) {
++    uint8_t i;
++    for (i = 0; i < CONCENTRATOR_MAX_NODES; i++) {
++        if (knownSensorNodes[i].address == node->address)
++        {
++            knownSensorNodes[i].latestAdcValue = node->latestAdcValue;
++            knownSensorNodes[i].latestRssi = node->latestRssi;
++            knownSensorNodes[i].button = node->button;
++            break;
++        }
++    }
++}
++
++static void addNewNode(struct AdcSensorNode* node) {
++    *lastAddedSensorNode = *node;
++
++    /* Increment and wrap */
++    lastAddedSensorNode++;
++    if (lastAddedSensorNode > &knownSensorNodes[CONCENTRATOR_MAX_NODES-1])
++    {
++        lastAddedSensorNode = knownSensorNodes;
++    }
++}
++
++static void updateLcd(void) {
++    struct AdcSensorNode* nodePointer = knownSensorNodes;
++    uint8_t currentLcdLine;
++
++    /* Clear the display and write header on first line */
++    Display_clear(hDisplayLcd);
++    Display_printf(hDisplayLcd, 0, 0, "Nodes Value SW  RSSI");
++
++    //clear screen, put cuser to beggining of terminal and print the header
++    Display_printf(hDisplaySerial, 0, 0, "\033[2J \033[0;0HNodes   Value   SW    RSSI");
++
++    /* Start on the second line */
++    currentLcdLine = 1;
++
++    /* Write one line per node */
++    while ((nodePointer < &knownSensorNodes[CONCENTRATOR_MAX_NODES]) &&
++          (nodePointer->address != 0) &&
++          (currentLcdLine < CONCENTRATOR_DISPLAY_LINES))
++    {
++        /* print to LCD */
++        Display_printf(hDisplayLcd, currentLcdLine, 0, "0x%02x  %04d  %d   %04d",
++                nodePointer->address, nodePointer->latestAdcValue, nodePointer->button,
++                nodePointer->latestRssi);
++
++        /* print to UART */
++        Display_printf(hDisplaySerial, 0, 0, "0x%02x    %04d    %d    %04d",
++                nodePointer->address, nodePointer->latestAdcValue, nodePointer->button,
++                nodePointer->latestRssi);
++
++        nodePointer++;
++        currentLcdLine++;
++    }
++}
+diff -urN ConcentratorTask.h concentrator_new/ConcentratorTask.h
+--- ConcentratorTask.h	1969-12-31 18:00:00.000000000 -0600
++++ concentrator_new/ConcentratorTask.h	2017-07-07 13:15:02.978061400 -0500
+@@ -0,0 +1,41 @@
++/*
++ * Copyright (c) 2015, Texas Instruments Incorporated
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * *  Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ *
++ * *  Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * *  Neither the name of Texas Instruments Incorporated nor the names of
++ *    its contributors may be used to endorse or promote products derived
++ *    from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef TASKS_CONCENTRATORTASK_H_
++#define TASKS_CONCENTRATORTASK_H_
++
++#define CONCENTRATOR_MAX_NODES 7
++
++/* Create the ConcentratorRadioTask and creates all TI-RTOS objects */
++void ConcentratorTask_init(void);
++
++#endif /* TASKS_CONCENTRATORTASK_H_ */
+diff -urN easylink/EasyLink.c concentrator_new/easylink/EasyLink.c
+--- easylink/EasyLink.c	1969-12-31 18:00:00.000000000 -0600
++++ concentrator_new/easylink/EasyLink.c	2017-07-07 13:13:56.457000000 -0500
+@@ -0,0 +1,1116 @@
++/*
++ * Copyright (c) 2015-2017, Texas Instruments Incorporated
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * *  Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ *
++ * *  Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * *  Neither the name of Texas Instruments Incorporated nor the names of
++ *    its contributors may be used to endorse or promote products derived
++ *    from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/***** Includes *****/
++#include "EasyLink.h"
++
++/* Drivers */
++#include <ti/drivers/rf/RF.h>
++#include "smartrf_settings/smartrf_settings_predefined.h"
++#include "smartrf_settings/smartrf_settings.h"
++
++#include <ti/sysbios/knl/Semaphore.h>
++#include <xdc/runtime/Error.h>
++#include <ti/sysbios/BIOS.h>
++#include <ti/sysbios/knl/Task.h>
++
++#ifdef DEVICE_FAMILY
++    #undef DEVICE_FAMILY_PATH
++    #define DEVICE_FAMILY_PATH(x) <ti/devices/DEVICE_FAMILY/x>
++    #include DEVICE_FAMILY_PATH(driverlib/rf_data_entry.h)
++    #include DEVICE_FAMILY_PATH(driverlib/rf_prop_mailbox.h)
++    #include DEVICE_FAMILY_PATH(driverlib/rf_prop_cmd.h)
++    #include DEVICE_FAMILY_PATH(driverlib/chipinfo.h)
++    #include DEVICE_FAMILY_PATH(inc/hw_ccfg.h)
++    #include DEVICE_FAMILY_PATH(inc/hw_ccfg_simple_struct.h)
++#else
++    #error "You must define DEVICE_FAMILY at the project level as one of cc26x0, cc26x0r2, cc13x0, etc."
++#endif
++
++#include "Board.h"
++
++union setupCmd_t{
++    rfc_CMD_PROP_RADIO_DIV_SETUP_t divSetup;
++    rfc_CMD_PROP_RADIO_SETUP_t setup;
++};
++
++#define EASYLINK_MAX_ADDR_SIZE           8
++#define EASYLINK_MAX_ADDR_FILTERS        3
++
++//Primary IEEE address location
++#define EASYLINK_PRIMARY_IEEE_ADDR_LOCATION   0x500012F0
++//Secondary IEEE address location
++#define EASYLINK_SECONDARY_IEEE_ADDR_LOCATION 0x0001FFC8
++
++#define EASYLINK_RF_EVENT_MASK  ( RF_EventLastCmdDone | RF_EventCmdError | \
++             RF_EventCmdAborted | RF_EventCmdStopped | RF_EventCmdCancelled )
++
++#define EASYLINK_RF_CMD_HANDLE_INVALID -1
++
++#define RF_MODE_MULTIPLE 0x05
++
++#define EasyLink_CmdHandle_isValid(handle) (handle >= 0)
++
++/***** Prototypes *****/
++static EasyLink_TxDoneCb txCb;
++static EasyLink_ReceiveCb rxCb;
++
++/***** Variable declarations *****/
++
++static RF_Object rfObject;
++static RF_Handle rfHandle;
++
++//Rx buffer includes data entry structure, hdr (len=1byte), dst addr (max of 8 bytes) and data
++//which must be aligned to 4B
++#if defined(__TI_COMPILER_VERSION__)
++    #pragma DATA_ALIGN (rxBuffer, 4);
++        static uint8_t rxBuffer[sizeof(rfc_dataEntryGeneral_t) + 1 + EASYLINK_MAX_ADDR_SIZE + EASYLINK_MAX_DATA_LENGTH];
++#elif defined(__IAR_SYSTEMS_ICC__)
++    #pragma data_alignment = 4
++        static uint8_t rxBuffer[sizeof(rfc_dataEntryGeneral_t) + 1 + EASYLINK_MAX_ADDR_SIZE + EASYLINK_MAX_DATA_LENGTH];
++#elif defined(__GNUC__)
++        static uint8_t rxBuffer[sizeof(rfc_dataEntryGeneral_t) + 1 + EASYLINK_MAX_ADDR_SIZE + EASYLINK_MAX_DATA_LENGTH];
++#else
++    #error This compiler is not supported.
++#endif
++
++static dataQueue_t dataQueue;
++static rfc_propRxOutput_t rxStatistics;
++
++//Tx buffer includes hdr (len=1byte), dst addr (max of 8 bytes) and data
++static uint8_t txBuffer[1 + EASYLINK_MAX_ADDR_SIZE + EASYLINK_MAX_DATA_LENGTH];
++
++//Addr size for Filter and Tx/Rx operations
++//Set default to 1 byte addr to work with SmartRF
++//studio default settings
++static uint8_t addrSize = 1;
++
++//Indicating that the API is initialized
++static uint8_t configured = 0;
++//Indicating that the API suspended
++static uint8_t suspended = 0;
++
++//RF Params alowing configuration of the inactivity timeout, which is the time
++//it takes for the radio to shut down when there are no commands in the queue
++static RF_Params rfParams;
++static bool rfParamsConfigured = 0;
++
++//Flag used to indicate the muli client operation is enabled
++static bool rfModeMultiClient = false;
++
++//Async Rx timeout value
++static uint32_t asyncRxTimeOut = 0;
++
++//local commands, contents will be defined by modulation type
++static union setupCmd_t EasyLink_cmdPropRadioSetup;
++static rfc_CMD_FS_t EasyLink_cmdFs;
++static RF_Mode EasyLink_RF_prop;
++static rfc_CMD_PROP_TX_t EasyLink_cmdPropTx;
++static rfc_CMD_PROP_RX_ADV_t EasyLink_cmdPropRxAdv;
++
++// The table for setting the Rx Address Filters
++static uint8_t addrFilterTable[EASYLINK_MAX_ADDR_FILTERS * EASYLINK_MAX_ADDR_SIZE] = {0xaa};
++
++//Mutex for locking the RF driver resource
++static Semaphore_Handle busyMutex;
++
++//Handle for last Async command, which is needed by EasyLink_abort
++static RF_CmdHandle asyncCmdHndl = EASYLINK_RF_CMD_HANDLE_INVALID;
++
++//Callback for Async Tx complete
++static void txDoneCallback(RF_Handle h, RF_CmdHandle ch, RF_EventMask e)
++{
++    EasyLink_Status status;
++
++    //Release now so user callback can call EasyLink API's
++    Semaphore_post(busyMutex);
++    asyncCmdHndl = EASYLINK_RF_CMD_HANDLE_INVALID;
++
++    if (e & RF_EventLastCmdDone)
++    {
++        status = EasyLink_Status_Success;
++    }
++    else if ( (e & RF_EventCmdAborted) || (e & RF_EventCmdCancelled ) )
++    {
++        status = EasyLink_Status_Aborted;
++    }
++    else
++    {
++        status = EasyLink_Status_Tx_Error;
++    }
++
++    if (txCb != NULL)
++    {
++        txCb(status);
++    }
++}
++
++//Callback for Async Rx complete
++static void rxDoneCallback(RF_Handle h, RF_CmdHandle ch, RF_EventMask e)
++{
++    EasyLink_Status status = EasyLink_Status_Rx_Error;
++    //create rxPacket as a static so that the large payload buffer it is not
++    //allocated from the stack
++    static EasyLink_RxPacket rxPacket;
++    rfc_dataEntryGeneral_t *pDataEntry;
++    pDataEntry = (rfc_dataEntryGeneral_t*) rxBuffer;
++
++    //Release now so user callback can call EasyLink API's
++    Semaphore_post(busyMutex);
++    asyncCmdHndl = EASYLINK_RF_CMD_HANDLE_INVALID;
++
++    if (e & RF_EventLastCmdDone)
++    {
++        //Check command status
++        if (EasyLink_cmdPropRxAdv.status == PROP_DONE_OK)
++        {
++            //Check that data entry status indicates it is finished with
++            if (pDataEntry->status != DATA_ENTRY_FINISHED)
++            {
++                status = EasyLink_Status_Rx_Error;
++            }
++            else if ( (rxStatistics.nRxOk == 1) ||
++                     //or filer disabled and ignore due to addr mistmatch
++                     ((EasyLink_cmdPropRxAdv.pktConf.filterOp == 1) &&
++                      (rxStatistics.nRxIgnored == 1)) )
++            {
++                //copy length from pDataEntry
++                rxPacket.len = *(uint8_t*)(&pDataEntry->data) - addrSize;
++                //copy address from packet payload (as it is not in hdr)
++                memcpy(&rxPacket.dstAddr, (&pDataEntry->data + 1), addrSize);
++                //copy payload
++                memcpy(&rxPacket.payload, (&pDataEntry->data + 1 + addrSize), rxPacket.len);
++                rxPacket.rssi = rxStatistics.lastRssi;
++                rxPacket.absTime = rxStatistics.timeStamp;
++
++                status = EasyLink_Status_Success;
++            }
++            else if ( rxStatistics.nRxBufFull == 1)
++            {
++                status = EasyLink_Status_Rx_Buffer_Error;
++            }
++            else if ( rxStatistics.nRxStopped == 1)
++            {
++                status = EasyLink_Status_Aborted;
++            }
++            else
++            {
++                status = EasyLink_Status_Rx_Error;
++            }
++        }
++        else if ( EasyLink_cmdPropRxAdv.status == PROP_DONE_RXTIMEOUT)
++        {
++            status = EasyLink_Status_Rx_Timeout;
++        }
++        else
++        {
++            status = EasyLink_Status_Rx_Error;
++        }
++    }
++    else if ( (e == RF_EventCmdAborted) || e == RF_EventCmdStopped )
++    {
++        status = EasyLink_Status_Aborted;
++    }
++
++    if (rxCb != NULL)
++    {
++        rxCb(&rxPacket, status);
++    }
++}
++
++//Callback for Async TX Test mode
++static void asyncCmdCallback(RF_Handle h, RF_CmdHandle ch, RF_EventMask e)
++{
++    Semaphore_post(busyMutex);
++    asyncCmdHndl = EASYLINK_RF_CMD_HANDLE_INVALID;
++}
++
++static EasyLink_Status enableTestMode(EasyLink_CtrlOption mode)
++{
++    EasyLink_Status status = EasyLink_Status_Cmd_Error;
++    //This needs to be static as it is used by the RF driver and Modem after
++    //this function exits
++    static rfc_CMD_TX_TEST_t txTestCmd = {0};
++
++    if ( (!configured) || suspended)
++    {
++        return EasyLink_Status_Config_Error;
++    }
++    if ( (mode != EasyLink_Ctrl_Test_Tone) &&
++        (mode != EasyLink_Ctrl_Test_Signal) )
++    {
++        return EasyLink_Status_Param_Error;
++    }
++    //Check and take the busyMutex
++    if ( (Semaphore_pend(busyMutex, 0) == FALSE) || (EasyLink_CmdHandle_isValid(asyncCmdHndl)) )
++    {
++        return EasyLink_Status_Busy_Error;
++    }
++
++    txTestCmd.commandNo = CMD_TX_TEST;
++    txTestCmd.startTrigger.triggerType = TRIG_NOW;
++    txTestCmd.startTrigger.pastTrig = 1;
++    txTestCmd.startTime = 0;
++
++    txTestCmd.config.bFsOff = 1;
++    txTestCmd.syncWord = EasyLink_cmdPropTx.syncWord;
++    txTestCmd.config.whitenMode = EasyLink_cmdPropRadioSetup.setup.formatConf.whitenMode;
++
++    //set tone (unmodulated) or signal (modulated)
++    if (mode == EasyLink_Ctrl_Test_Tone)
++    {
++        txTestCmd.config.bUseCw = 1;
++    }
++    else
++    {
++        txTestCmd.config.bUseCw = 0;
++    }
++
++    //generate continuous test signal
++    txTestCmd.endTrigger.triggerType = TRIG_NEVER;
++
++    /* Post command and store Cmd Handle for future abort */
++    asyncCmdHndl = RF_postCmd(rfHandle, (RF_Op*)&txTestCmd, RF_PriorityNormal,
++            asyncCmdCallback, EASYLINK_RF_EVENT_MASK);
++
++    /* Has command completed? */
++    uint16_t count = 0;
++    while (txTestCmd.status != ACTIVE)
++    {
++        //The command did not complete as fast as expected, sleep for 10ms
++        Task_sleep(10000 / Clock_tickPeriod);
++
++        if (count++ > 500)
++        {
++            //Should not get here, if we did Something went wrong with the
++            //the RF Driver, get out of here and return an error.
++            //The next command will likely lock up.
++            break;
++        }
++    }
++
++    if (txTestCmd.status == ACTIVE)
++    {
++        status = EasyLink_Status_Success;
++    }
++
++    return status;
++}
++
++EasyLink_Status EasyLink_init(EasyLink_PhyType ui32ModType)
++{
++    if (configured)
++    {
++        //Already configure, check and take the busyMutex
++        if (Semaphore_pend(busyMutex, 0) == FALSE)
++        {
++            return EasyLink_Status_Busy_Error;
++        }
++        RF_close(rfHandle);
++    }
++
++    if (!rfParamsConfigured)
++    {
++        RF_Params_init(&rfParams);
++        //set default InactivityTimeout to 1000us
++        rfParams.nInactivityTimeout = EasyLink_ms_To_RadioTime(1);
++        rfParamsConfigured = 1;
++    }
++
++    if (ui32ModType == EasyLink_Phy_Custom)
++    {
++        if(ChipInfo_GetChipType() == CHIP_TYPE_CC2650)
++        {
++            memcpy(&EasyLink_cmdPropRadioSetup.setup, &RF_cmdPropRadioDivSetup, sizeof(rfc_CMD_PROP_RADIO_SETUP_t));
++        }
++        else
++        {
++            memcpy(&EasyLink_cmdPropRadioSetup.divSetup, &RF_cmdPropRadioDivSetup, sizeof(rfc_CMD_PROP_RADIO_DIV_SETUP_t));
++        }
++        memcpy(&EasyLink_cmdFs, &RF_cmdFs, sizeof(rfc_CMD_FS_t));
++        memcpy(&EasyLink_RF_prop, &RF_prop, sizeof(RF_Mode));
++        memcpy(&EasyLink_cmdPropRxAdv, RF_pCmdPropRxAdv_preDef, sizeof(rfc_CMD_PROP_RX_ADV_t));
++        memcpy(&EasyLink_cmdPropTx, &RF_cmdPropTx, sizeof(rfc_CMD_PROP_TX_t));
++    }
++    else if ( (ui32ModType == EasyLink_Phy_50kbps2gfsk) && (ChipInfo_GetChipType() != CHIP_TYPE_CC2650) )
++    {
++        memcpy(&EasyLink_cmdPropRadioSetup.divSetup,
++                RF_pCmdPropRadioDivSetup_fsk,
++                sizeof(rfc_CMD_PROP_RADIO_DIV_SETUP_t));
++        memcpy(&EasyLink_cmdFs, RF_pCmdFs_preDef, sizeof(rfc_CMD_FS_t));
++        memcpy(&EasyLink_RF_prop, RF_pProp_fsk, sizeof(RF_Mode));
++        memcpy(&EasyLink_cmdPropRxAdv, RF_pCmdPropRxAdv_preDef, sizeof(rfc_CMD_PROP_RX_ADV_t));
++        memcpy(&EasyLink_cmdPropTx, RF_pCmdPropTx_preDef, sizeof(rfc_CMD_PROP_TX_t));
++    }
++    else if ( (ui32ModType == EasyLink_Phy_625bpsLrm) && (ChipInfo_GetChipType() != CHIP_TYPE_CC2650) )
++    {
++        memcpy(&EasyLink_cmdPropRadioSetup.divSetup,
++                RF_pCmdPropRadioDivSetup_lrm,
++                sizeof(rfc_CMD_PROP_RADIO_DIV_SETUP_t));
++        memcpy(&EasyLink_cmdFs, RF_pCmdFs_preDef, sizeof(rfc_CMD_FS_t));
++        memcpy(&EasyLink_RF_prop, RF_pProp_lrm, sizeof(RF_Mode));
++        memcpy(&EasyLink_cmdPropRxAdv, RF_pCmdPropRxAdv_preDef, sizeof(rfc_CMD_PROP_RX_ADV_t));
++        memcpy(&EasyLink_cmdPropTx, RF_pCmdPropTx_preDef, sizeof(rfc_CMD_PROP_TX_t));
++    }
++    else if ( (ui32ModType == EasyLink_Phy_2_4_200kbps2gfsk) && (ChipInfo_GetChipType() == CHIP_TYPE_CC2650) )
++    {
++        memcpy(&EasyLink_cmdPropRadioSetup.setup,
++                RF_pCmdPropRadioSetup_2_4G_fsk,
++                sizeof(rfc_CMD_PROP_RADIO_SETUP_t));
++        memcpy(&EasyLink_cmdFs, RF_pCmdFs_preDef, sizeof(rfc_CMD_FS_t));
++        memcpy(&EasyLink_RF_prop, RF_pProp_2_4G_fsk, sizeof(RF_Mode));
++        memcpy(&EasyLink_cmdPropRxAdv, RF_pCmdPropRxAdv_preDef, sizeof(rfc_CMD_PROP_RX_ADV_t));
++        memcpy(&EasyLink_cmdPropTx, RF_pCmdPropTx_preDef, sizeof(rfc_CMD_PROP_TX_t));
++    }
++
++    else if ( (ui32ModType == EasyLink_Phy_5kbpsSlLr) && (ChipInfo_GetChipType() != CHIP_TYPE_CC2650) )
++    {
++        memcpy(&EasyLink_cmdPropRadioSetup.setup,
++                RF_pCmdPropRadioDivSetup_sl_lr,
++                sizeof(rfc_CMD_PROP_RADIO_DIV_SETUP_t));
++        memcpy(&EasyLink_cmdFs, RF_pCmdFs_preDef, sizeof(rfc_CMD_FS_t));
++        memcpy(&EasyLink_RF_prop, RF_pProp_sl_lr, sizeof(RF_Mode));
++        memcpy(&EasyLink_cmdPropRxAdv, RF_pCmdPropRxAdv_preDef, sizeof(rfc_CMD_PROP_RX_ADV_t));
++        memcpy(&EasyLink_cmdPropTx, RF_pCmdPropTx_preDef, sizeof(rfc_CMD_PROP_TX_t));
++    }
++    else
++    {
++        if (busyMutex != NULL)
++        {
++            Semaphore_post(busyMutex);
++        }
++        return EasyLink_Status_Param_Error;
++    }
++
++    if (rfModeMultiClient)
++    {
++        EasyLink_RF_prop.rfMode = RF_MODE_MULTIPLE;
++    }
++
++    /* Request access to the radio */
++    rfHandle = RF_open(&rfObject, &EasyLink_RF_prop,
++            (RF_RadioSetup*)&EasyLink_cmdPropRadioSetup.setup, &rfParams);
++
++    //Set Rx packet size, taking into account addr which is not in the hdr
++    //(only length can be)
++    EasyLink_cmdPropRxAdv.maxPktLen = EASYLINK_MAX_DATA_LENGTH +
++            EASYLINK_MAX_ADDR_SIZE;
++    EasyLink_cmdPropRxAdv.pAddr = addrFilterTable;
++    addrSize = 1;
++    EasyLink_cmdPropRxAdv.addrConf.addrSize = addrSize; //Set addr size to the
++                                                        //default
++    EasyLink_cmdPropRxAdv.pktConf.filterOp = 1;  // Disable Addr filter by
++                                                 //default
++    EasyLink_cmdPropRxAdv.pQueue = &dataQueue;   // Set the Data Entity queue
++                                                 // for received data
++    EasyLink_cmdPropRxAdv.pOutput = (uint8_t*)&rxStatistics;
++
++    //Set the frequency
++    RF_runCmd(rfHandle, (RF_Op*)&EasyLink_cmdFs, RF_PriorityNormal, 0, //asyncCmdCallback,
++            EASYLINK_RF_EVENT_MASK);
++
++    //set default asyncRxTimeOut to 0
++    asyncRxTimeOut = 0;
++
++    //Create a semaphore for blocking commands
++    Semaphore_Params params;
++    Error_Block eb;
++
++    // init params
++    Semaphore_Params_init(&params);
++    Error_init(&eb);
++
++    // create semaphore instance if not already created
++    if (busyMutex == NULL)
++    {
++        busyMutex = Semaphore_create(0, &params, &eb);
++        if (busyMutex == NULL)
++        {
++            return EasyLink_Status_Mem_Error;
++        }
++
++        Semaphore_post(busyMutex);
++    }
++    else
++    {
++        //already configured and taken busyMutex, so release it
++        Semaphore_post(busyMutex);
++    }
++
++    configured = 1;
++
++    return EasyLink_Status_Success;
++}
++
++EasyLink_Status EasyLink_setFrequency(uint32_t ui32Freq)
++{
++    EasyLink_Status status = EasyLink_Status_Cmd_Error;
++    //uint64_t ui64FractFreq;
++
++    if ( (!configured) || suspended)
++    {
++        return EasyLink_Status_Config_Error;
++    }
++    //Check and take the busyMutex
++    if (Semaphore_pend(busyMutex, 0) == FALSE)
++    {
++        return EasyLink_Status_Busy_Error;
++    }
++
++    /* Set the frequency */
++    EasyLink_cmdFs.frequency = (uint16_t)(ui32Freq / 1000000);
++    EasyLink_cmdFs.fractFreq = (uint16_t) (((uint64_t)ui32Freq -
++            ((uint64_t)EasyLink_cmdFs.frequency * 1000000)) * 65536 / 1000000);
++
++    /* Run command */
++    RF_EventMask result = RF_runCmd(rfHandle, (RF_Op*)&EasyLink_cmdFs,
++            RF_PriorityNormal, 0, EASYLINK_RF_EVENT_MASK);
++
++    if (result & RF_EventLastCmdDone)
++    {
++        status = EasyLink_Status_Success;
++    }
++
++    Semaphore_post(busyMutex);
++
++    return status;
++}
++
++uint32_t EasyLink_getFrequency(void)
++{
++    uint32_t freq_khz;
++
++    if ( (!configured) || suspended)
++    {
++        return EasyLink_Status_Config_Error;
++    }
++
++    freq_khz = EasyLink_cmdFs.frequency * 1000000;
++    freq_khz += ((((uint64_t)EasyLink_cmdFs.fractFreq * 1000000)) / 65536);
++
++    return freq_khz;
++}
++
++EasyLink_Status EasyLink_setRfPwr(int8_t i8txPowerdBm)
++{
++    EasyLink_Status status = EasyLink_Status_Cmd_Error;
++    rfc_CMD_SCH_IMM_t immOpCmd = {0};
++    rfc_CMD_SET_TX_POWER_t cmdSetPower = {0};
++    uint8_t txPowerIdx;
++
++    if ( (!configured) || suspended)
++    {
++        return EasyLink_Status_Config_Error;
++    }
++    //Check and take the busyMutex
++    if (Semaphore_pend(busyMutex, 0) == FALSE)
++    {
++        return EasyLink_Status_Busy_Error;
++    }
++
++    immOpCmd.commandNo = CMD_SCH_IMM;
++    immOpCmd.startTrigger.triggerType = TRIG_NOW;
++    immOpCmd.startTrigger.pastTrig = 1;
++    immOpCmd.startTime = 0;
++
++    cmdSetPower.commandNo = CMD_SET_TX_POWER;
++
++    if (i8txPowerdBm < rfPowerTable[0].dbm)
++    {
++        i8txPowerdBm = rfPowerTable[0].dbm;
++    }
++    else if (i8txPowerdBm > rfPowerTable[rfPowerTableSize-1].dbm )
++    {
++        i8txPowerdBm = rfPowerTable[rfPowerTableSize-1].dbm;
++    }
++
++    //if max power is requested then the CCFG_FORCE_VDDR_HH must be set in
++    //the ccfg
++#if (CCFG_FORCE_VDDR_HH != 0x1)
++    if (i8txPowerdBm == rfPowerTable[rfPowerTableSize-1].dbm)
++    {
++        //Release the busyMutex
++        Semaphore_post(busyMutex);
++        return EasyLink_Status_Config_Error;
++    }
++#endif
++
++    for (txPowerIdx = 0;
++            txPowerIdx < rfPowerTableSize;
++            txPowerIdx++)
++    {
++        if (i8txPowerdBm >= rfPowerTable[txPowerIdx].dbm)
++        {
++            cmdSetPower.txPower = rfPowerTable[txPowerIdx].txPower;
++            EasyLink_cmdPropRadioSetup.setup.txPower = rfPowerTable[txPowerIdx].txPower;
++        }
++    }
++
++    //point the Operational Command to the immediate set power command
++    immOpCmd.cmdrVal = (uint32_t) &cmdSetPower;
++
++    // Send command
++    RF_CmdHandle cmd = RF_postCmd(rfHandle, (RF_Op*)&immOpCmd,
++            RF_PriorityNormal, 0, EASYLINK_RF_EVENT_MASK);
++
++    RF_EventMask result = RF_pendCmd(rfHandle, cmd,  (RF_EventLastCmdDone |
++            RF_EventCmdError));
++
++    if (result & RF_EventLastCmdDone)
++    {
++        status = EasyLink_Status_Success;
++    }
++
++    //Release the busyMutex
++    Semaphore_post(busyMutex);
++
++    return status;
++}
++
++int8_t EasyLink_getRfPwr(void)
++{
++    uint8_t txPowerIdx;
++    int8_t txPowerdBm = 0xff;
++
++    if ( (!configured) || suspended)
++    {
++        return EasyLink_Status_Config_Error;
++    }
++
++    for (txPowerIdx = 0;
++            txPowerIdx < rfPowerTableSize;
++            txPowerIdx++)
++    {
++        if (rfPowerTable[txPowerIdx].txPower == EasyLink_cmdPropRadioSetup.setup.txPower)
++        {
++            txPowerdBm = rfPowerTable[txPowerIdx].dbm;
++            continue;
++        }
++    }
++
++    //if CCFG_FORCE_VDDR_HH is not set max power cannot be achieved
++#if (CCFG_FORCE_VDDR_HH != 0x1)
++    if (txPowerdBm == rfPowerTable[rfPowerTableSize-1].dbm)
++    {
++        txPowerdBm = rfPowerTable[rfPowerTableSize-2].dbm;
++    }
++#endif
++
++    return txPowerdBm;
++}
++
++uint32_t EasyLink_getAbsTime(void)
++{
++    if ( (!configured) || suspended)
++    {
++        return EasyLink_Status_Config_Error;
++    }
++
++    return RF_getCurrentTime();
++}
++
++EasyLink_Status EasyLink_transmit(EasyLink_TxPacket *txPacket)
++{
++    EasyLink_Status status = EasyLink_Status_Tx_Error;
++
++    if ( (!configured) || suspended)
++    {
++        return EasyLink_Status_Config_Error;
++    }
++    //Check and take the busyMutex
++    if (Semaphore_pend(busyMutex, 0) == FALSE)
++    {
++        return EasyLink_Status_Busy_Error;
++    }
++    if (txPacket->len > EASYLINK_MAX_DATA_LENGTH)
++    {
++        return EasyLink_Status_Param_Error;
++    }
++
++    memcpy(txBuffer, txPacket->dstAddr, addrSize);
++    memcpy(txBuffer + addrSize, txPacket->payload, txPacket->len);
++
++    //packet length to Tx includes address
++    EasyLink_cmdPropTx.pktLen = txPacket->len + addrSize;
++    EasyLink_cmdPropTx.pPkt = txBuffer;
++
++    if (txPacket->absTime != 0)
++    {
++        EasyLink_cmdPropTx.startTrigger.triggerType = TRIG_ABSTIME;
++        EasyLink_cmdPropTx.startTrigger.pastTrig = 1;
++        EasyLink_cmdPropTx.startTime = txPacket->absTime;
++    }
++    else
++    {
++        EasyLink_cmdPropTx.startTrigger.triggerType = TRIG_NOW;
++        EasyLink_cmdPropTx.startTrigger.pastTrig = 1;
++        EasyLink_cmdPropTx.startTime = 0;
++    }
++
++    // Send packet
++    RF_CmdHandle cmdHdl = RF_postCmd(rfHandle, (RF_Op*)&EasyLink_cmdPropTx,
++            RF_PriorityNormal, 0, EASYLINK_RF_EVENT_MASK);
++
++    // Wait for Command to complete
++    RF_EventMask result = RF_pendCmd(rfHandle, cmdHdl,  (RF_EventLastCmdDone |
++            RF_EventCmdError));
++
++
++    if (result & RF_EventLastCmdDone)
++    {
++        status = EasyLink_Status_Success;
++    }
++
++    //Release the busyMutex
++    Semaphore_post(busyMutex);
++
++
++    return status;
++}
++
++EasyLink_Status EasyLink_transmitAsync(EasyLink_TxPacket *txPacket, EasyLink_TxDoneCb cb)
++{
++    EasyLink_Status status = EasyLink_Status_Tx_Error;
++
++    //Check if not configure or already an Async command being performed
++    if ( (!configured) || suspended)
++    {
++        return EasyLink_Status_Config_Error;
++    }
++    //Check and take the busyMutex
++    if ( (Semaphore_pend(busyMutex, 0) == FALSE) || (EasyLink_CmdHandle_isValid(asyncCmdHndl)) )
++    {
++        return EasyLink_Status_Busy_Error;
++    }
++    if (txPacket->len > EASYLINK_MAX_DATA_LENGTH)
++    {
++        return EasyLink_Status_Param_Error;
++    }
++
++    //store application callback
++    txCb = cb;
++
++    memcpy(txBuffer, txPacket->dstAddr, addrSize);
++    memcpy(txBuffer + addrSize, txPacket->payload, txPacket->len);
++
++    //packet length to Tx includes address
++    EasyLink_cmdPropTx.pktLen = txPacket->len + addrSize;
++    EasyLink_cmdPropTx.pPkt = txBuffer;
++
++    if (txPacket->absTime != 0)
++    {
++        EasyLink_cmdPropTx.startTrigger.triggerType = TRIG_ABSTIME;
++        EasyLink_cmdPropTx.startTrigger.pastTrig = 1;
++        EasyLink_cmdPropTx.startTime = txPacket->absTime;
++    }
++    else
++    {
++        EasyLink_cmdPropTx.startTrigger.triggerType = TRIG_NOW;
++        EasyLink_cmdPropTx.startTrigger.pastTrig = 1;
++        EasyLink_cmdPropTx.startTime = 0;
++    }
++
++    /* Send packet */
++    asyncCmdHndl = RF_postCmd(rfHandle, (RF_Op*)&EasyLink_cmdPropTx,
++            RF_PriorityNormal, txDoneCallback, EASYLINK_RF_EVENT_MASK);
++
++    if (EasyLink_CmdHandle_isValid(asyncCmdHndl))
++    {
++        status = EasyLink_Status_Success;
++    }
++
++    //busyMutex will be released by the callback
++
++    return status;
++}
++
++EasyLink_Status EasyLink_receive(EasyLink_RxPacket *rxPacket)
++{
++    EasyLink_Status status = EasyLink_Status_Rx_Error;
++    RF_EventMask result;
++    rfc_dataEntryGeneral_t *pDataEntry;
++
++    if ( (!configured) || suspended)
++    {
++        return EasyLink_Status_Config_Error;
++    }
++    //Check and take the busyMutex
++    if (Semaphore_pend(busyMutex, 0) == FALSE)
++    {
++        return EasyLink_Status_Busy_Error;
++    }
++
++    pDataEntry = (rfc_dataEntryGeneral_t*) rxBuffer;
++    //data entry rx buffer includes hdr (len-1Byte), addr (max 8Bytes) and data
++    pDataEntry->length = 1 + EASYLINK_MAX_ADDR_SIZE + EASYLINK_MAX_DATA_LENGTH;
++    pDataEntry->status = 0;
++    dataQueue.pCurrEntry = (uint8_t*) pDataEntry;
++    dataQueue.pLastEntry = NULL;
++    EasyLink_cmdPropRxAdv.pQueue = &dataQueue;               /* Set the Data Entity queue for received data */
++    EasyLink_cmdPropRxAdv.pOutput = (uint8_t*)&rxStatistics;
++
++    if (rxPacket->absTime != 0)
++    {
++        EasyLink_cmdPropRxAdv.startTrigger.triggerType = TRIG_ABSTIME;
++        EasyLink_cmdPropRxAdv.startTrigger.pastTrig = 1;
++        EasyLink_cmdPropRxAdv.startTime = rxPacket->absTime;
++    }
++    else
++    {
++        EasyLink_cmdPropRxAdv.startTrigger.triggerType = TRIG_NOW;
++        EasyLink_cmdPropRxAdv.startTrigger.pastTrig = 1;
++        EasyLink_cmdPropRxAdv.startTime = 0;
++    }
++
++    if (rxPacket->rxTimeout != 0)
++    {
++        EasyLink_cmdPropRxAdv.endTrigger.triggerType = TRIG_ABSTIME;
++        EasyLink_cmdPropRxAdv.endTime = RF_getCurrentTime() + rxPacket->rxTimeout;
++    }
++    else
++    {
++        EasyLink_cmdPropRxAdv.endTrigger.triggerType = TRIG_NEVER;
++        EasyLink_cmdPropRxAdv.endTime = 0;
++    }
++
++    //Clear the Rx statistics structure
++    memset(&rxStatistics, 0, sizeof(rfc_propRxOutput_t));
++
++    RF_CmdHandle rx_cmd = RF_postCmd(rfHandle, (RF_Op*)&EasyLink_cmdPropRxAdv,
++            RF_PriorityNormal, 0, EASYLINK_RF_EVENT_MASK);
++
++    /* Wait for Command to complete */
++    result = RF_pendCmd(rfHandle, rx_cmd, (RF_EventLastCmdDone | RF_EventCmdError));
++
++    if (result & RF_EventLastCmdDone)
++    {
++        //Check command status
++        if (EasyLink_cmdPropRxAdv.status == PROP_DONE_OK)
++        {
++            //Check that data entry status indicates it is finished with
++            if (pDataEntry->status != DATA_ENTRY_FINISHED)
++            {
++                status = EasyLink_Status_Rx_Error;
++            }
++            //check Rx Statistics
++            else if ( (rxStatistics.nRxOk == 1) ||
++                     //or  filer disabled and ignore due to addr mistmatch
++                     ((EasyLink_cmdPropRxAdv.pktConf.filterOp == 1) &&
++                      (rxStatistics.nRxIgnored == 1)) )
++            {
++                //copy length from pDataEntry (- addrSize)
++                rxPacket->len = *(uint8_t*)(&pDataEntry->data) - addrSize;
++                //copy address
++                memcpy(rxPacket->dstAddr, (&pDataEntry->data + 1), addrSize);
++                //copy payload
++                memcpy(&rxPacket->payload, (&pDataEntry->data + 1 + addrSize), (rxPacket->len));
++                rxPacket->rssi = rxStatistics.lastRssi;
++
++                status = EasyLink_Status_Success;
++                rxPacket->absTime = rxStatistics.timeStamp;
++            }
++            else if ( rxStatistics.nRxBufFull == 1)
++            {
++                status = EasyLink_Status_Rx_Buffer_Error;
++            }
++            else if ( rxStatistics.nRxStopped == 1)
++            {
++                status = EasyLink_Status_Aborted;
++            }
++            else
++            {
++                status = EasyLink_Status_Rx_Error;
++            }
++        }
++        else if ( EasyLink_cmdPropRxAdv.status == PROP_DONE_RXTIMEOUT)
++        {
++            status = EasyLink_Status_Rx_Timeout;
++        }
++        else
++        {
++            status = EasyLink_Status_Rx_Error;
++        }
++    }
++
++    //Release the busyMutex
++    Semaphore_post(busyMutex);
++
++    return status;
++}
++
++EasyLink_Status EasyLink_receiveAsync(EasyLink_ReceiveCb cb, uint32_t absTime)
++{
++    EasyLink_Status status = EasyLink_Status_Rx_Error;
++    rfc_dataEntryGeneral_t *pDataEntry;
++
++    //Check if not configure of already an Async command being performed
++    if ( (!configured) || suspended)
++    {
++        return EasyLink_Status_Config_Error;
++    }
++    //Check and take the busyMutex
++    if ( (Semaphore_pend(busyMutex, 0) == FALSE) || (EasyLink_CmdHandle_isValid(asyncCmdHndl)) )
++    {
++        return EasyLink_Status_Busy_Error;
++    }
++
++    rxCb = cb;
++
++    pDataEntry = (rfc_dataEntryGeneral_t*) rxBuffer;
++    //data entry rx buffer includes hdr (len-1Byte), addr (max 8Bytes) and data
++    pDataEntry->length = 1 + EASYLINK_MAX_ADDR_SIZE + EASYLINK_MAX_DATA_LENGTH;
++    pDataEntry->status = 0;
++    dataQueue.pCurrEntry = (uint8_t*) pDataEntry;
++    dataQueue.pLastEntry = NULL;
++    EasyLink_cmdPropRxAdv.pQueue = &dataQueue;               /* Set the Data Entity queue for received data */
++    EasyLink_cmdPropRxAdv.pOutput = (uint8_t*)&rxStatistics;
++
++    if (absTime != 0)
++    {
++        EasyLink_cmdPropRxAdv.startTrigger.triggerType = TRIG_ABSTIME;
++        EasyLink_cmdPropRxAdv.startTrigger.pastTrig = 1;
++        EasyLink_cmdPropRxAdv.startTime = absTime;
++    }
++    else
++    {
++        EasyLink_cmdPropRxAdv.startTrigger.triggerType = TRIG_NOW;
++        EasyLink_cmdPropRxAdv.startTrigger.pastTrig = 1;
++        EasyLink_cmdPropRxAdv.startTime = 0;
++    }
++
++    if (asyncRxTimeOut != 0)
++    {
++        EasyLink_cmdPropRxAdv.endTrigger.triggerType = TRIG_ABSTIME;
++        EasyLink_cmdPropRxAdv.endTime = RF_getCurrentTime() + asyncRxTimeOut;
++    }
++    else
++    {
++        EasyLink_cmdPropRxAdv.endTrigger.triggerType = TRIG_NEVER;
++        EasyLink_cmdPropRxAdv.endTime = 0;
++    }
++
++    //Clear the Rx statistics structure
++    memset(&rxStatistics, 0, sizeof(rfc_propRxOutput_t));
++
++    asyncCmdHndl = RF_postCmd(rfHandle, (RF_Op*)&EasyLink_cmdPropRxAdv,
++            RF_PriorityNormal, rxDoneCallback, EASYLINK_RF_EVENT_MASK);
++
++    if (EasyLink_CmdHandle_isValid(asyncCmdHndl))
++    {
++        status = EasyLink_Status_Success;
++    }
++
++    //busyMutex will be released in callback
++
++    return status;
++}
++
++EasyLink_Status EasyLink_abort(void)
++{
++    EasyLink_Status status = EasyLink_Status_Cmd_Error;
++
++    if ( (!configured) || suspended)
++    {
++        return EasyLink_Status_Config_Error;
++    }
++    //check an Async command is running, if not return success
++    if (!EasyLink_CmdHandle_isValid(asyncCmdHndl))
++    {
++        return EasyLink_Status_Aborted;
++    }
++
++    //force abort (gracefull param set to 0)
++    if (RF_cancelCmd(rfHandle, asyncCmdHndl, 0) == RF_StatSuccess)
++    {
++       /* Wait for Command to complete */
++       RF_EventMask result = RF_pendCmd(rfHandle, asyncCmdHndl, (RF_EventLastCmdDone | RF_EventCmdError |
++               RF_EventCmdAborted | RF_EventCmdCancelled | RF_EventCmdStopped));
++
++       if (result & RF_EventLastCmdDone)
++       {
++           status = EasyLink_Status_Success;
++       }
++    }
++    else
++    {
++       status = EasyLink_Status_Cmd_Error;
++    }
++
++    return status;
++}
++
++EasyLink_Status EasyLink_enableRxAddrFilter(uint8_t* pui8AddrFilterTable, uint8_t ui8AddrSize, uint8_t ui8NumAddrs)
++{
++    EasyLink_Status status = EasyLink_Status_Param_Error;
++
++    if ( (!configured) || suspended)
++    {
++        return EasyLink_Status_Config_Error;
++    }
++    if ( Semaphore_pend(busyMutex, 0) == FALSE )
++    {
++        return EasyLink_Status_Busy_Error;
++    }
++
++    if ( (pui8AddrFilterTable != NULL) &&
++            (ui8AddrSize != 0) && (ui8NumAddrs != 0) &&
++            (ui8AddrSize == addrSize) &&
++            (ui8NumAddrs <= EASYLINK_MAX_ADDR_FILTERS) )
++    {
++        memcpy(addrFilterTable, pui8AddrFilterTable, EASYLINK_MAX_ADDR_SIZE * EASYLINK_MAX_ADDR_FILTERS);
++        EasyLink_cmdPropRxAdv.addrConf.addrSize = ui8AddrSize;
++        EasyLink_cmdPropRxAdv.addrConf.numAddr = ui8NumAddrs;
++        EasyLink_cmdPropRxAdv.pktConf.filterOp = 0;
++
++        status = EasyLink_Status_Success;
++    }
++    else if (pui8AddrFilterTable == NULL)
++    {
++        //disable filter
++        EasyLink_cmdPropRxAdv.pktConf.filterOp = 1;
++
++        status = EasyLink_Status_Success;
++    }
++
++    //Release the busyMutex
++    Semaphore_post(busyMutex);
++
++    return status;
++}
++
++EasyLink_Status EasyLink_setCtrl(EasyLink_CtrlOption Ctrl, uint32_t ui32Value)
++{
++    EasyLink_Status status = EasyLink_Status_Param_Error;
++    switch(Ctrl)
++    {
++        case EasyLink_Ctrl_AddSize:
++            if (ui32Value <= EASYLINK_MAX_ADDR_SIZE)
++            {
++                addrSize = (uint8_t) ui32Value;
++                EasyLink_cmdPropRxAdv.addrConf.addrSize = addrSize;
++                status = EasyLink_Status_Success;
++            }
++            break;
++        case EasyLink_Ctrl_Idle_TimeOut:
++            rfParams.nInactivityTimeout = ui32Value;
++            rfParamsConfigured = 1;
++            status = EasyLink_Status_Success;
++            break;
++        case EasyLink_Ctrl_MultiClient_Mode:
++            rfModeMultiClient = (bool) ui32Value;
++            status = EasyLink_Status_Success;
++            break;
++        case EasyLink_Ctrl_AsyncRx_TimeOut:
++            asyncRxTimeOut = ui32Value;
++            status = EasyLink_Status_Success;
++            break;
++        case EasyLink_Ctrl_Test_Tone:
++            status = enableTestMode(EasyLink_Ctrl_Test_Tone);
++            break;
++        case EasyLink_Ctrl_Test_Signal:
++            status = enableTestMode(EasyLink_Ctrl_Test_Signal);
++            break;
++    }
++
++    return status;
++}
++
++EasyLink_Status EasyLink_getCtrl(EasyLink_CtrlOption Ctrl, uint32_t* pui32Value)
++{
++    EasyLink_Status status = EasyLink_Status_Cmd_Error;
++
++    switch(Ctrl)
++    {
++        case EasyLink_Ctrl_AddSize:
++            *pui32Value = addrSize;
++            status = EasyLink_Status_Success;
++            break;
++        case EasyLink_Ctrl_Idle_TimeOut:
++            *pui32Value = rfParams.nInactivityTimeout;
++            status = EasyLink_Status_Success;
++            break;
++        case EasyLink_Ctrl_MultiClient_Mode:
++            *pui32Value = (uint32_t) rfModeMultiClient;
++            status = EasyLink_Status_Success;
++            break;
++        case EasyLink_Ctrl_AsyncRx_TimeOut:
++            *pui32Value = asyncRxTimeOut;
++            status = EasyLink_Status_Success;
++            break;
++        case EasyLink_Ctrl_Test_Tone:
++        case EasyLink_Ctrl_Test_Signal:
++            *pui32Value = 0;
++            status = EasyLink_Status_Success;
++            break;
++    }
++
++    return status;
++}
++
++EasyLink_Status EasyLink_getIeeeAddr(uint8_t *ieeeAddr)
++{
++    EasyLink_Status status = EasyLink_Status_Param_Error;
++
++    if (ieeeAddr != NULL)
++    {
++        int i;
++
++        //Reading from primary IEEE location...
++        uint8_t *location = (uint8_t *)EASYLINK_PRIMARY_IEEE_ADDR_LOCATION;
++
++        /*
++         * ...unless we can find a byte != 0xFF in secondary
++         *
++         * Intentionally checking all 8 bytes here instead of len, because we
++         * are checking validity of the entire IEEE address irrespective of the
++         * actual number of bytes the caller wants to copy over.
++         */
++        for (i = 0; i < 8; i++) {
++            if (((uint8_t *)EASYLINK_SECONDARY_IEEE_ADDR_LOCATION)[i] != 0xFF) {
++                //A byte in the secondary location is not 0xFF. Use the
++                //secondary
++                location = (uint8_t *)EASYLINK_SECONDARY_IEEE_ADDR_LOCATION;
++                break;
++            }
++        }
++
++        //inverting byte order
++       for (i = 0; i < 8; i++) {
++           ieeeAddr[i] = location[8 - 1 - i];
++       }
++
++
++        status = EasyLink_Status_Success;
++    }
++
++    return status;
++}
+diff -urN easylink/EasyLink.h concentrator_new/easylink/EasyLink.h
+--- easylink/EasyLink.h	1969-12-31 18:00:00.000000000 -0600
++++ concentrator_new/easylink/EasyLink.h	2017-07-07 13:15:02.990561400 -0500
+@@ -0,0 +1,497 @@
++/*
++ * Copyright (c) 2015-2017, Texas Instruments Incorporated
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * *  Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ *
++ * *  Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * *  Neither the name of Texas Instruments Incorporated nor the names of
++ *    its contributors may be used to endorse or promote products derived
++ *    from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++//!
++//! \defgroup EasyLink
++
++//!
++//! \ingroup EasyLink
++//@{
++
++//*****************************************************************************
++//  @file       EasyLink.h
++//
++//  @brief      EasyLink RF API for CC13xx/CC26xx family
++//
++// # Overview #
++// The EasyLink API should be used in application code. The EasyLink API is
++// intended to abstract the RF Driver in order to give a simple API for
++// customers to use as is or extend to suit their application[Use Cases]
++// (@ref USE_CASES).
++//
++// # General Behavior #
++// Before using the EasyLink API:
++//   - The EasyLink Layer is initialized by calling EasyLink_init(). This
++//     initialises and opens the RF driver and configuring a modulation scheme
++//     passed to EasyLink_init.
++//   - The RX and TX can operate independently of each other.
++//   .
++// The following is true for receive operation:
++//   - RX is enabled by calling EasyLink_receive() or EasyLink_receiveAsync().
++//   - Entering RX can be immediate or scheduled.
++//   - EasyLink_receive() is blocking and EasyLink_receiveAsync() is nonblocking.
++//   - the EasyLink API does not queue messages so calling another API function
++//     while in EasyLink_receiveAsync() will return EasyLink_Status_Busy_Error
++//   - an Async operation can be cancelled with EasyLink_abort()
++//   .
++// The following apply for transmit operation:
++//   - TX is enabled by calling EasyLink_transmit() or EasyLink_transmitAsync().
++//   - TX can be immediate or scheduled.
++//   - EasyLink_transmit() is blocking and EasyLink_transmitAsync() is nonblocking
++//   - EasyLink_transmit() for a scheduled command, or if TX can not start
++//   - the EasyLink API does not queue messages so calling another API function
++//     while in EasyLink_transmitAsync() will return EasyLink_Status_Busy_Error
++//   - an Async operation can be cancelled with EasyLink_abort()
++//
++// # Error handling #
++//    The EasyLink API will return EasyLink_Status containing success or error
++//    code. The EasyLink_Status code are:
++//    EasyLink_Status_Success
++//    EasyLink_Status_Config_Error
++//    EasyLink_Status_Param_Error
++//    EasyLink_Status_Mem_Error
++//    EasyLink_Status_Cmd_Error
++//    EasyLink_Status_Tx_Error
++//    EasyLink_Status_Rx_Error
++//    EasyLink_Status_Rx_Timeout
++//    EasyLink_Status_Busy_Error
++//    EasyLink_Status_Aborted
++//   .
++//
++// # Power Management #
++// The TI-RTOS power management framework will try to put the device into the most
++// power efficient mode whenever possible. Please see the technical reference
++// manual for further details on each power mode.
++//
++// The EasyLink Layer uses the power management offered by the RF driver Refer to the RF
++// drive documentation for more details.
++//
++// # Supported Functions #
++// | Generic API function          | Description                                       |
++// |-------------------------------|---------------------------------------------------|
++// | EasyLink_init()               | Init's and opens the RF driver and configures the |
++// |                               | specified modulation                              |
++// | EasyLink_transmit()           | Blocking Transmit                                 |
++// | EasyLink_transmitAsync()      | Nonblocking Transmit                              |
++// | EasyLink_receive()            | Blocking Receive                                  |
++// | EasyLink_receiveAsync()       | Nonblocking Receive                               |
++// | EasyLink_abort()              | Aborts a non blocking call                        |
++// | EasyLink_EnableRxAddrFilter() | Enables/Disables RX filtering on the Addr         |
++// | EasyLink_GetIeeeAddr()        | Gets the IEEE Address                             |
++// | EasyLink_SetFreq()            | Sets the frequency                                |
++// | EasyLink_GetFreq()            | Gets the frequency                                |
++// | EasyLink_SetRfPwr()           | Sets the Tx Power                                 |
++// | EasyLink_GetRfPwr()           | Gets the Tx Power                                 |
++//
++// # Frame Structure #
++// The EasyLink implements a basic header for transmitting and receiving data. This header supports
++// addressing for a star or point-to-point network with acknowledgements.
++//
++// Packet structure:
++//     _________________________________________________________
++//    |           |                   |                         |
++//    | 1B Length | 1-64b Dst Address |         Payload         |
++//    |___________|___________________|_________________________|
++//
++//
++//
++//  # Not Supported Functionality #
++//
++//
++//*****************************************************************************
++#ifndef Easylink__include
++#define Easylink__include
++
++//*****************************************************************************
++//
++// If building with a C++ compiler, make all of the definitions in this header
++// have a C binding.
++//
++//*****************************************************************************
++#ifdef __cplusplus
++extern "C"
++{
++#endif
++
++#include <stdbool.h>
++#include <stdint.h>
++
++#define EASYLINK_API_VERSION "EasyLink-v2.10.00"
++
++/// \brief defines the largest Tx/Rx payload that the interface can support
++#define EASYLINK_MAX_DATA_LENGTH        128
++
++/// \brief defines the Tx/Rx Max Address Size
++#define EASYLINK_MAX_ADDR_SIZE        8
++
++/// \brief defines the Max number of Rx Address filters
++#define EASYLINK_MAX_ADDR_FILTERS     3
++
++/// \brief macro to convert from Radio Time Ticks to ms
++#define EasyLink_RadioTime_To_ms(radioTime) ((1000 * radioTime) / 4000000)
++
++/// \brief macro to convert from ms to Radio Time Ticks
++#define EasyLink_ms_To_RadioTime(ms) (ms*(4000000/1000))
++
++#define CC1190_PA_EN            IOID_30
++#define CC1190_LNA_EN           IOID_29
++#define CC1190_HGM              IOID_28
++
++/// \brief EasyLink Status and error codes
++typedef enum
++{
++    EasyLink_Status_Success         = 0, ///Success
++    EasyLink_Status_Config_Error    = 1, ///Configuration error
++    EasyLink_Status_Param_Error     = 2, ///Param error
++    EasyLink_Status_Mem_Error       = 3, ///Memory Error
++    EasyLink_Status_Cmd_Error       = 4, ///Memory Error
++    EasyLink_Status_Tx_Error        = 5, ///Tx Error
++    EasyLink_Status_Rx_Error        = 6, ///Rx Error
++    EasyLink_Status_Rx_Timeout      = 7, ///Rx Error
++    EasyLink_Status_Rx_Buffer_Error = 8, ///Rx Buffer Error
++    EasyLink_Status_Busy_Error      = 9, ///Busy Error
++    EasyLink_Status_Aborted         = 10 ///Cmd stopped or aborted
++} EasyLink_Status;
++
++
++/// \brief Phy Type passed to EasyLink_init
++typedef enum
++{
++    EasyLink_Phy_Custom = 0, ///Customer Phy specific settings exported from SmartRF Studio
++    EasyLink_Phy_50kbps2gfsk = 1, ///Phy settings for Sub1G 50kbps data rate, IEEE 802.15.4g GFSK.
++    EasyLink_Phy_625bpsLrm = 2, ///Phy settings for Sub1G 625bps data rate, Long Range Mode.
++    EasyLink_Phy_2_4_200kbps2gfsk = 3, ///Phy settings for 2.4Ghz 200kbps data rate, IEEE 802.15.4g GFSK.
++    EasyLink_Phy_5kbpsSlLr = 4, // SimpleLink Long Range (5 kbps)
++} EasyLink_PhyType;
++
++/// \brief Advance configuration options
++typedef enum
++{
++    EasyLink_Ctrl_AddSize = 0, ///Set the number of bytes in Addr for both Addr
++    ///Filter and Tx/Rx operations
++    EasyLink_Ctrl_Idle_TimeOut = 1, ///Set the time for Radio to return to
++                                    ///idle after. Must be set before calling
++                                    //EasyLink_init.
++    EasyLink_Ctrl_MultiClient_Mode = 2, ///Set Multiclient mode for application
++                                        ///that will use multiple RF clients.
++                                        ///Must be set before calling
++                                        ///EasyLink_init.
++    EasyLink_Ctrl_AsyncRx_TimeOut = 3,  ///Relative time in ticks from Async
++                                        ///Rx start to TimeOut. A value of
++                                        ///0 means no timeout
++    EasyLink_Ctrl_Test_Tone = 4, ///Enable/Disable Test mode for Tone
++    EasyLink_Ctrl_Test_Signal = 5, ///Enable/Disable Test mode for Signal
++} EasyLink_CtrlOption;
++
++/// \brief Structure for the TX Packet
++typedef struct
++{
++        uint8_t dstAddr[8];     /// Dst Address
++        uint32_t absTime;        ///Absolute time to Tx packet (0 for immediate)
++        ///Layer will use last SeqNum used + 1
++        uint8_t len;             ///Payload Length
++        uint8_t payload[EASYLINK_MAX_DATA_LENGTH];       ///Payload
++} EasyLink_TxPacket;
++
++/// \brief Structure for the RX'ed Packet
++typedef struct
++{
++        uint8_t dstAddr[8];      ///Dst Address of RX'ed packet
++        int8_t rssi;             ///rssi of RX'ed packet
++        uint32_t absTime;        ///Absolute time to turn on Rx when passed
++                                 ///(0 for immediate), Or Absolute time that packet was Rx
++                                 ///when returned.
++        uint32_t rxTimeout;      ///Relative time in ticks from Rx start to Rx TimeOut
++                                 ///a value of 0 means no timeout
++        uint8_t len;             ///length of RX'ed packet
++        uint8_t payload[EASYLINK_MAX_DATA_LENGTH]; ///payload of RX'ed packet
++} EasyLink_RxPacket;
++
++/** \brief EasyLink Callback function type for Received packet, registered
++ *   with EasyLink_ReceiveAsync
++ */
++typedef void (*EasyLink_ReceiveCb)(EasyLink_RxPacket * rxPacket,
++        EasyLink_Status status);
++
++/** \brief EasyLink Callback function type for Tx Done registered with
++ *  EasyLink_TransmitAsync
++ */
++typedef void (*EasyLink_TxDoneCb)(EasyLink_Status status);
++
++//*****************************************************************************
++//
++//! \brief Initializes the radio with specified Phy settings
++//!
++//! This function configures the radio phy settings. If the ui32ModType
++//! is EasyLink_Phy_Custom then the configuration is taken from srf_settings.h.
++//! If a specific phy configuration is required (and not supported by any of
++//! the defined Phy types in EasyLink_PhyType then you can cut and past the
++//! RF setting from the SmartRF Studio code export tool. This will copy and use
++//! the RF_prop, RF_cmdPropRadioDivSetup and RF_cmdFs commands, as well as the
++//! Synchword from the RF_cmdPropTx and RF_cmdPropRx commands.
++//!
++//! \param ui32ModType is a set to:
++//! - \ref EasyLink_Phy_50kbps2gfsk
++//! - \ref EasyLink_Phy_625bpsLrm
++//! - \ref EasyLink_Phy_Custom
++//!
++//! \return EasyLink_Status
++//
++//*****************************************************************************
++extern EasyLink_Status EasyLink_init(EasyLink_PhyType ui32ModType);
++
++//*****************************************************************************
++//
++//! \brief Gets the absolute radio time
++//!
++//! This function returns the absolute radio time and can be used for
++//! monitoring or Tx/Rx events using the EasyLink_TxPacket_t and
++//! EasyLink_RxPacket_t absTime field.
++//!
++//!
++//! \return absolute time
++//
++//*****************************************************************************
++extern uint32_t EasyLink_getAbsTime(void);
++
++//*****************************************************************************
++//
++//! \brief Sends a Packet with blocking call.
++//!
++//! This function is a blocking call to send a packet. If the Tx is
++//! successfully scheduled then the function will block until the Tx is
++//! complete.
++//!
++//! \param txPacket - The descriptor for the packet to be Tx'ed.
++//!
++//! \return EasyLink_Status
++//
++//*****************************************************************************
++extern EasyLink_Status EasyLink_transmit(EasyLink_TxPacket *txPacket);
++
++//*****************************************************************************
++//
++//! \brief Sends a Packet with non blocking call.
++//!
++//! This function is a non blocking call to send a packet. If the Tx is
++//! successfully scheduled then the callback will be call once the Tx is
++//! complete. The Tx will timeout if EasyLink_Ctrl_AsyncTx_TimeOut
++//! ctrl message is used to set the timeout to something other than 0.
++//!
++//! \param txPacket - The descriptor for the packet to be Tx'ed.
++//! \param cb     - The tx done function pointer.
++//!
++//! \return EasyLink_Status
++//
++//*****************************************************************************
++extern EasyLink_Status EasyLink_transmitAsync(EasyLink_TxPacket *txPacket,
++        EasyLink_TxDoneCb cb);
++
++//*****************************************************************************
++//
++//! \brief Blocking call that waits for an Rx Packet.
++//!
++//! This function is a blocking call to wait for an Rx packet.
++//!
++//! \param rxPacket - The descriptor for the packet to be Rx'ed.
++//!
++//! \return EasyLink_Status
++//
++//*****************************************************************************
++extern EasyLink_Status EasyLink_receive(EasyLink_RxPacket *rxPacket);
++
++//*****************************************************************************
++//
++//! \brief Enables Asynchronous Packet Rx with non blocking call.
++//!
++//! This function is a non blocking call to Rx a packet. The Rx is turned on
++//! and the Callback is called once a packet is received. The Rx will timeout
++//! if EasyLink_Ctrl_AsyncRx_TimeOut ctrl message is used to set the timeout
++//! to something other than 0.
++//!
++//! \param cb        - The rx function pointer.
++//! \param absTime   - Start time of Rx (0: now !0: absolute radio time to
++//!                    start Rx)
++//!
++//! \return EasyLink_Status
++//
++//*****************************************************************************
++extern EasyLink_Status EasyLink_receiveAsync(EasyLink_ReceiveCb cb, uint32_t absTime);
++
++//*****************************************************************************
++//
++//! \brief Abort a previously call Async Tx/Rx.
++//!
++//! This function is a blocking call to abort a previous Async Tx/Rx
++//!
++//! \return EasyLink_Status
++//
++//*****************************************************************************
++extern EasyLink_Status EasyLink_abort(void);
++
++
++//*****************************************************************************
++//
++//! \brief Sets the Frequency
++//!
++//! This function set the radio to the specified frequency. Note that this will
++//! be rounded to the nearest frequency supported by the Frequency Synthesizer.
++//!
++//! \param ui16Freq Frequency in units of kHz
++//!
++//! \return EasyLink_Status
++//
++//*****************************************************************************
++extern EasyLink_Status EasyLink_setFrequency(uint32_t ui16Freq);
++
++//*****************************************************************************
++//
++//! \brief Gets the Frequency
++//!
++//! This function gets Frequency in units of kHz. This function will return the
++//! value set in the Frequency Synthesizer, and may not be the same as set
++//! using easyLink_setFrequency API. Note that this value does not include any
++//! offsets for deviations due to factors such as temperature and hence this API
++//! should not be used to get an accurate measure of frequency.
++
++//!
++//! \return Frequency in units of kHz
++//
++//*****************************************************************************
++extern uint32_t EasyLink_getFrequency(void);
++
++//*****************************************************************************
++//
++//! \brief Enables the address filter
++//!
++//! This function enables the address filter to filter out address that are not
++//! in the address table provided.
++//!
++//! \param pui8AddrFilterTable A uint8 pointer to a variable size 2d array
++//!  containing the addresses to filter on.
++//! \param ui8AddrSize The size of the address elements
++//! \param ui8NumAddrs The number of address elements
++//!
++//! \return EasyLink_Status
++//
++//*****************************************************************************
++extern EasyLink_Status EasyLink_enableRxAddrFilter(uint8_t* pui8AddrFilterTable,
++        uint8_t ui8AddrSize, uint8_t ui8NumAddrs);
++
++//*****************************************************************************
++//
++//! \brief Gets the IEEE address
++//!
++//! This function gets the IEEE address
++//!
++//! \param ieeeAddr pointer to an 8 element byte array to write the IEEE
++//! address to.
++//!
++//! \return EasyLink_Status
++//
++//*****************************************************************************
++extern EasyLink_Status EasyLink_getIeeeAddr(uint8_t *ieeeAddr);
++
++//*****************************************************************************
++//
++//! \brief Sets the TX Power
++//!
++//! This function sets the Tx Power
++//!
++//! \param i8Power the tx power in dBm's to be set. integers of -10 and between
++//!        0-14 dBm are accepted. Values above 14 are rounded to 14 and below 0
++//!        are rounded to -10
++//!
++//! \return EasyLink_Status
++//
++//*****************************************************************************
++extern EasyLink_Status EasyLink_setRfPwr(int8_t i8Power);
++
++//*****************************************************************************
++//
++//! \brief Gets the TX Power
++//!
++//! This function gets the Tx Power in dBm, values ranging from -10 to 14 dBm
++//! should be expect
++//!
++//! \return power in dBm
++//
++//*****************************************************************************
++extern int8_t EasyLink_getRfPwr(void);
++
++//*****************************************************************************
++//
++//! \brief Sets advanced configuration options
++//!
++//! This function allows setting some of the advanced configuration options
++//!
++//! \param Ctrl - The control option to be set
++//! \param ui32Value - The value to set the control option to
++//
++//! \return EasyLink_Status
++//!
++//*****************************************************************************
++extern EasyLink_Status EasyLink_setCtrl(EasyLink_CtrlOption Ctrl,
++        uint32_t ui32Value);
++
++//*****************************************************************************
++//
++//! \brief Gets advanced configuration options
++//!
++//! This function allows getting some of the advanced configuration options
++//!
++//! \param Ctrl - The control option to get
++//! \param pui32Value - Pointer to return the control option value
++//!
++//! \return EasyLink_Status
++//!
++//*****************************************************************************
++extern EasyLink_Status EasyLink_getCtrl(EasyLink_CtrlOption Ctrl,
++        uint32_t* pui32Value);
++
++//*****************************************************************************
++//
++// Mark the end of the C bindings section for C++ compilers.
++//
++//*****************************************************************************
++#ifdef __cplusplus
++}
++#endif
++
++#endif // Easylink__include
++
++//*****************************************************************************
++//
++//! Close the Doxygen group.
++//! @}
++//
++//*****************************************************************************
+diff -urN RadioProtocol.h concentrator_new/RadioProtocol.h
+--- RadioProtocol.h	1969-12-31 18:00:00.000000000 -0600
++++ concentrator_new/RadioProtocol.h	2017-07-07 13:15:03.020561400 -0500
+@@ -0,0 +1,69 @@
++/*
++ * Copyright (c) 2015-2016, Texas Instruments Incorporated
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * *  Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ *
++ * *  Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * *  Neither the name of Texas Instruments Incorporated nor the names of
++ *    its contributors may be used to endorse or promote products derived
++ *    from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef RADIOPROTOCOL_H_
++#define RADIOPROTOCOL_H_
++
++#include "stdint.h"
++#include "easylink/EasyLink.h"
++
++#define RADIO_CONCENTRATOR_ADDRESS     0x00
++#define RADIO_EASYLINK_MODULATION     EasyLink_Phy_5kbpsSlLr
++
++#define RADIO_PACKET_TYPE_ACK_PACKET             0
++#define RADIO_PACKET_TYPE_ADC_SENSOR_PACKET      1
++#define RADIO_PACKET_TYPE_DM_SENSOR_PACKET       2
++#define RADIO_PACKET_TYPE_GPS_SENSOR_PACKET      4
++
++struct PacketHeader {
++    uint8_t sourceAddress;
++    uint8_t packetType;
++};
++
++struct AdcSensorPacket {
++    struct PacketHeader header;
++    uint16_t adcValue;
++};
++
++struct DualModeSensorPacket {
++    struct PacketHeader header;
++    uint16_t adcValue;
++    uint16_t batt;
++    uint32_t time100MiliSec;
++    uint8_t button;
++};
++
++struct AckPacket {
++    struct PacketHeader header;
++};
++
++#endif /* RADIOPROTOCOL_H_ */
+diff -urN rfWsnConcentrator.c concentrator_new/rfWsnConcentrator.c
+--- rfWsnConcentrator.c	1969-12-31 18:00:00.000000000 -0600
++++ concentrator_new/rfWsnConcentrator.c	2017-07-07 13:15:03.028061400 -0500
+@@ -0,0 +1,84 @@
++/*
++ * Copyright (c) 2015-2016, Texas Instruments Incorporated
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * *  Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ *
++ * *  Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * *  Neither the name of Texas Instruments Incorporated nor the names of
++ *    its contributors may be used to endorse or promote products derived
++ *    from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/*
++ *  ======== empty_min.c ========
++ */
++/* XDCtools Header files */
++#include <xdc/std.h>
++#include <xdc/runtime/System.h>
++
++/* BIOS Header files */
++#include <ti/sysbios/BIOS.h>
++#include <ti/drivers/Power.h>
++#include <ti/drivers/power/PowerCC26XX.h>
++
++/* TI-RTOS Header files */
++#include <ti/display/Display.h>
++#include <ti/drivers/PIN.h>
++#include <ti/drivers/UART.h>
++#include <ti/drivers/SPI.h>
++
++/* Board Header files */
++#include "Board.h"
++
++#include "ConcentratorRadioTask.h"
++#include "ConcentratorTask.h"
++
++#include "board_palna.h"
++
++/*
++ *  ======== main ========
++ */
++int main(void)
++{
++    /* Call driver init functions. */
++    Board_initGeneral();
++
++    /* Initialise the UART and SPI for the display driver. */
++    Display_init();
++    UART_init();
++    SPI_init();
++
++#ifdef CC1310_CC1190_LP
++    Board_Palna_initialize(1);
++#endif
++
++    /* Initialize concentrator tasks */
++    ConcentratorRadioTask_init();
++    ConcentratorTask_init();
++
++    /* Start BIOS */
++    BIOS_start();
++
++    return (0);
++}

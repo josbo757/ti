@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<!--
+/******************************************************************************
+ 
+@file cc13xx_map.html
+ 
+@brief front end file
+ 
+Group: WCS LPC
+$Target Device: DEVICES $
+ 
+******************************************************************************
+$License: BSD3 2016 $
+******************************************************************************
+$Release Name: PACKAGE NAME $
+$Release Date: PACKAGE RELEASE DATE $
+*****************************************************************************/
+-->
+
+<head>
+
+
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="http://cdn.leafletjs.com/leaflet-0.5.1/leaflet.css" />
+    <!-- Bootstrap core CSS -->
+    <link href="css/main.css" rel="stylesheet">
+
+    <title>TI CC13xx GPS Range Test</title>
+
+</head>
+
+<body>
+    <script type="text/javascript" src="gpsdata.js"></script>
+    <script>
+        function Node(address) {
+            this.address = address;
+            this.markers = [];
+        }
+
+        // Color gradient for RSSI mapping
+        var gradient = [
+            "#21FF21", "#24F61F", "#27ED1E", "#2AE41D", "#2EDB1C", "#31D31B",
+            "#34CA1A", "#37C119", "#3BB817", "#3EAF16", "#41A715", "#459E14",
+            "#489513", "#4B8C12", "#4E8311", "#527B0F", "#55720E", "#58690D",
+            "#5B600C", "#5F570B", "#624F0A", "#654609", "#693D07", "#6C3406",
+            "#6F2B05", "#722304", "#761A03", "#791102", "#7C0801", "#800000"
+        ];
+        var map;
+        var icons = [];
+        var rssi = [];
+        var nodes = [];
+        var known_addresses = [];
+        var visible = true;
+        var markers = [];
+
+        function initMap() {
+            var i;
+            var z = 15;
+
+            // Create icon format
+            for (i = gradient.length - 1; i >= 0; i--) {
+                var newicon = {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: z * z * z * z / 10000,
+                    strokeOpacity: 0,
+                    fillColor: gradient[i],
+                    fillOpacity: 1, //.6
+                    labelOrigin: new google.maps.Point(0, 4)
+                };
+                icons.push(newicon);
+
+                var r = String(i);
+                rssi.push(r);
+            }
+
+            var temp_lat = 32.91192;
+            var temp_lng = -96.75291;
+
+            if (gps.length > 0) {
+                temp_lat = gps[0].lat;
+                temp_lng = gps[0].lng;
+            }
+
+            // Create Google Map
+            map = new google.maps.Map(document.getElementById('map'), {
+                zoom: z,
+                center: {
+                    lat: temp_lat,
+                    lng: temp_lng
+                }
+            });
+
+            if (gps.length == 0) {
+                // Attempt to geolocate for center position (prompts user to allow location access)
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(function(position) {
+                        var pos = {
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude
+                        };
+
+                        map.setCenter(pos);
+                    }, function() {
+                        handleLocationError(true, infoWindow, map.getCenter());
+                    });
+                } else {
+                    // Browser doesn't support Geolocation
+                    handleLocationError(false, infoWindow, map.getCenter());
+                }
+            }
+
+            i = 0;
+            while (i < gps.length) {
+                var newmarker = addMarker(i);
+                markers[i] = new google.maps.Marker(newmarker);
+                markers[i].addListener('click', function() {
+                    var addr = this.address
+                    if (visible) {
+                        for (var j = 0; j < markers.length; j++) {
+                            if (markers[j].address != addr)
+                                markers[j].setVisible(false)
+                        }
+                        visible = false;
+                    } else {
+                        for (var j = 0; j < markers.length; j++) {
+                            if (markers[j].address != addr)
+                                markers[j].setVisible(true)
+                        }
+                        visible = true;
+                    }
+                });
+                i++;
+            }
+
+            setInterval(function() {
+                imp('gpsdata.js', function(script) {});
+                while (i < gps.length) {
+                    var newmarker = addMarker(i);
+                    markers[i] = new google.maps.Marker(newmarker);
+                    google.maps.event.addListener(markers[i], 'click', function() {
+                        markers[i].setVisible(false); // maps API hide call
+                    });
+                    i++;
+                }
+            }, 500);
+
+        }
+
+        function addMarker(j) {
+            var r = gps[j].rssi + 75;
+            if (r > 57)
+                r = 57;
+            else if (r < 0)
+                r = 0;
+            r = Math.round(r / 2);
+
+            var m = {
+                position: gps[j],
+                zIndex: r,
+                icon: icons[r],
+                map: map,
+                title: 'Node ' + String(gps[j].addr) + '\nRSSI: ' + String(gps[j].rssi) + ' dBm\n' +
+                    'Altitude: ' + String(gps[j].alt) + ' m\n' + 'Time: ' + String(gps[j].time),
+                address: gps[j].addr
+            };
+            return m;
+        }
+
+        function imp(sr, c, tgt) {
+            tgt = tgt || document.body;
+            var s = document.createElement('SCRIPT');
+            s.charset = 'UTF-8';
+            if (typeof c === 'function') {
+                s.onload = function() {
+                    c(s);
+                };
+                s.onreadystatechange = function() {
+                    (/loaded|complete/).test(s.readyState) && c(s);
+                };
+            }
+            s.src = sr;
+            tgt.appendChild(s);
+            return s;
+        }
+    </script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB3akvFscd6l5WE2M8bjB6ZGzK1Vk5gXvw&callback=initMap">
+    </script>
+
+    <div class="wrapper">
+        <div class="header">
+            <h2 align="left">CC13XX GPS Range Tester</h2>
+        </div>
+    </div>
+    <!-- main Content -->
+    <div id="map">
+
+    </div>
+
+</body>
+
+</html>

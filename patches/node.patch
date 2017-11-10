@@ -1,0 +1,1055 @@
+diff -urN board_palna.c node_new/board_palna.c
+--- board_palna.c	1969-12-31 18:00:00.000000000 -0600
++++ node_new/board_palna.c	2017-07-07 13:16:49.742561400 -0500
+@@ -0,0 +1,99 @@
++/******************************************************************************
++
++ @file board_palna.c
++
++ @brief This file contains the interface to the CC1310-CC1190 LP PA/LNA
++
++ Group: WCS LPC
++ $Target Device: DEVICES $
++
++ ******************************************************************************
++ $License: BSD3 2016 $
++ ******************************************************************************
++ $Release Name: PACKAGE NAME $
++ $Release Date: PACKAGE RELEASE DATE $
++ *****************************************************************************/
++
++/******************************************************************************
++ Includes
++ *****************************************************************************/
++
++#include <xdc/std.h>
++
++#include <ti/drivers/PIN.h>
++#include <ti/drivers/pin/PINCC26XX.h>
++
++#include "board.h"
++#include "board_palna.h"
++
++/******************************************************************************
++ Constants
++ *****************************************************************************/
++
++#define Board_DIO28_HGM     IOID_28
++#define Board_DIO29_LNA     IOID_29
++#define Board_DIO30_PA      IOID_30
++
++/******************************************************************************
++ Typedefs
++ *****************************************************************************/
++
++/******************************************************************************
++ Local Variables
++ *****************************************************************************/
++
++/*
++ SensorTag LED has exactly the same attributes as that of
++ BoardGpioInitTable[]. There is no need to create a new one.
++ */
++static PIN_Config palnaPinTable[] =
++    {
++        Board_DIO28_HGM | PIN_GPIO_OUTPUT_EN | PIN_GPIO_HIGH | PIN_PUSHPULL
++            | PIN_DRVSTR_MAX, /* High Gain Mode by Default */
++        Board_DIO29_LNA | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL
++            | PIN_DRVSTR_MAX, /* LNA Off by Default */
++        Board_DIO30_PA  | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL
++            | PIN_DRVSTR_MAX, /* PA Off by Default */	
++        PIN_TERMINATE /* Terminate list     */
++    };
++
++/* PA/LNA pin state */
++static PIN_State palnaPinState;
++
++/* PA/LNA Pin Handle */
++static PIN_Handle palnaPinHandle;
++
++/******************************************************************************
++ Local Function Prototypes
++ *****************************************************************************/
++
++/******************************************************************************
++ Public Functions
++ *****************************************************************************/
++
++/*!
++ Initialize PA/LNA
++
++ Public function defined in board_palna.h
++ */
++void Board_Palna_initialize(uint32_t hgm)
++{
++	if (hgm)
++	{
++		if (!palnaPinHandle)
++		{
++			/* Open PA/LNA PIN driver */
++			palnaPinHandle = PIN_open(&palnaPinState, palnaPinTable);
++			
++			/* Set IO muxing for RFC GPOs */
++			PINCC26XX_setMux(palnaPinHandle, Board_DIO29_LNA, IOC_PORT_RFC_GPO0);
++			PINCC26XX_setMux(palnaPinHandle, Board_DIO30_PA, IOC_PORT_RFC_GPO1);
++		}
++		
++		PIN_setOutputValue(palnaPinHandle, Board_DIO28_HGM, (hgm & 1));
++			
++	}
++}
++
++
++
+diff -urN board_palna.h node_new/board_palna.h
+--- board_palna.h	1969-12-31 18:00:00.000000000 -0600
++++ node_new/board_palna.h	2017-07-07 13:16:49.747561400 -0500
+@@ -0,0 +1,45 @@
++/******************************************************************************
++
++ @file board_palna.h
++
++ @brief This file contains the PA/LNA Service definitions and prototypes.
++
++ Group: WCS LPC
++ $Target Device: DEVICES $
++
++ ******************************************************************************
++ $License: BSD3 2016 $
++ ******************************************************************************
++ $Release Name: PACKAGE NAME $
++ $Release Date: PACKAGE RELEASE DATE $
++ *****************************************************************************/
++#ifndef BOARD_PALNA_H
++#define BOARD_PALNA_H
++
++/******************************************************************************
++ Includes
++ *****************************************************************************/
++
++#ifdef __cplusplus
++extern "C"
++{
++#endif
++
++/******************************************************************************
++ Typedefs
++ *****************************************************************************/
++
++/******************************************************************************
++ API Functions
++ *****************************************************************************/
++
++/*!
++ * @brief   Initialize PA/LNA
++ */
++void Board_Palna_initialize(uint32_t hgm);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* BOARD_PALNA_H */
+diff -urN easylink/EasyLink.c node_new/easylink/EasyLink.c
+--- easylink/EasyLink.c	2017-09-11 10:38:35.568000000 -0500
++++ node_new/easylink/EasyLink.c	2017-07-07 13:16:49.767561400 -0500
+@@ -642,6 +642,7 @@
+ {
+     EasyLink_Status status = EasyLink_Status_Tx_Error;
+ 
++
+     if ( (!configured) || suspended)
+     {
+         return EasyLink_Status_Config_Error;
+@@ -690,6 +691,7 @@
+         status = EasyLink_Status_Success;
+     }
+ 
++
+     //Release the busyMutex
+     Semaphore_post(busyMutex);
+ 
+diff -urN easylink/EasyLink.h node_new/easylink/EasyLink.h
+--- easylink/EasyLink.h	2017-09-11 10:38:35.558000000 -0500
++++ node_new/easylink/EasyLink.h	2017-07-07 13:16:49.777561400 -0500
+@@ -162,6 +162,7 @@
+ /// \brief macro to convert from ms to Radio Time Ticks
+ #define EasyLink_ms_To_RadioTime(ms) (ms*(4000000/1000))
+ 
++
+ /// \brief EasyLink Status and error codes
+ typedef enum
+ {
+diff -urN NodeGPS.c node_new/NodeGPS.c
+--- NodeGPS.c	1969-12-31 18:00:00.000000000 -0600
++++ node_new/NodeGPS.c	2017-07-07 13:16:49.787561400 -0500
+@@ -0,0 +1,456 @@
++/*
++ * Copyright (c) 2015-2016, Texas Instruments Incorporated
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * *  Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ *
++ * *  Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * *  Neither the name of Texas Instruments Incorporated nor the names of
++ *    its contributors may be used to endorse or promote products derived
++ *    from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/***** Includes *****/
++
++#include <xdc/std.h>
++#include <xdc/runtime/System.h>
++
++#include <ti/sysbios/BIOS.h>
++#include <ti/sysbios/knl/Task.h>
++#include <ti/sysbios/knl/Semaphore.h>
++#include <ti/sysbios/knl/Event.h>
++#include <ti/sysbios/knl/Clock.h>
++
++#include <ti/drivers/PIN.h>
++
++/* Board Header files */
++#include "Board.h"
++
++#include "easylink/EasyLink.h"
++#include "NodeTask.h"
++#include "NodeRadioTask.h"
++
++#include <stdlib.h>
++#include <ti/drivers/UART.h>
++#include <ti/drivers/uart/UARTCC26XX.h>
++#include "RadioProtocol.h"
++
++#include "NodeGPS.h"
++
++/***** Variable declarations *****/
++struct gpsData_s gpsData;
++struct gpsSensorPacket_s gpsSensorPacket;
++
++#define GPS_TASK_STACK_SIZE 1024
++#define GPS_TASK_PRIORITY   4
++
++UART_Handle uart;
++UART_Params uartParams;
++
++Semaphore_Struct gpsSemStruct;
++Semaphore_Handle gpsSemHandle;
++
++uint8_t firstFix = 0;
++
++// report every 1 second
++uint8_t currentInterval = 0;
++uint32_t gpsReportingIntervalMs[6] = {500, 1500, 3500, 9500, 29500, 59500};
++
++// gps pin - set to HIGH to turn on gps
++#define GPS_PUSH_TO_FIX         IOID_11
++#define GPS_NRESET              IOID_5
++#define GPS_STATUS_SUCCESS      1
++#define GPS_STATUS_ERROR        2
++
++static Task_Params gpsTaskParams;
++Task_Struct gpsTask;    /* not static so you can see in ROV */
++static uint8_t gpsTaskStack[GPS_TASK_STACK_SIZE];
++struct gpsData_s latestGpsData;
++
++/* Clock for the fast report timeout */
++Clock_Struct gpsReportTimeoutClock;     /* not static so you can see in ROV */
++static Clock_Handle gpsReportTimeoutClockHandle;
++
++/* Pin driver handle */
++static PIN_Handle gpsPinHandle;
++static PIN_State gpsPinState;
++
++struct RadioOperation {
++    EasyLink_TxPacket easyLinkTxPacket;
++    uint8_t retriesDone;
++    uint8_t maxNumberOfRetries;
++    uint32_t ackTimeoutMs;
++    enum NodeRadioOperationStatus result;
++};
++
++extern Event_Handle nodeEventHandle;
++extern Semaphore_Handle radioAccessSemHandle;
++extern Semaphore_Handle radioResultSemHandle;
++extern Event_Handle radioOperationEventHandle;\
++extern struct RadioOperation currentRadioOperation;
++extern void rxDoneCallback(EasyLink_RxPacket * rxPacket, EasyLink_Status status);
++
++/* Enable the 3.3V power domain used by the LCD */
++PIN_Config gpsPinTable[] = {
++    GPS_PUSH_TO_FIX | PIN_GPIO_OUTPUT_EN | PIN_GPIO_HIGH | PIN_PUSHPULL | PIN_DRVSTR_MAX,
++    GPS_NRESET | PIN_GPIO_OUTPUT_EN | PIN_GPIO_HIGH | PIN_PUSHPULL | PIN_DRVSTR_MAX,
++    PIN_TERMINATE
++};
++
++/***** Prototypes *****/
++static void gpsTaskFunction(UArg arg0, UArg arg1);
++uint8_t readGPS(struct gpsData_s* gpsData);
++void gpsReportTimeoutCallback(UArg arg0);
++
++/***** Function definitions *****/
++void gpsTask_init(void)
++{
++    /* Construct a Semaphore object */
++    Semaphore_Params semParams;
++    Semaphore_Params_init(&semParams);
++    Semaphore_construct(&gpsSemStruct, 0, &semParams);
++    gpsSemHandle = Semaphore_handle(&gpsSemStruct);
++
++    /* Create the gps task */
++    Task_Params_init(&gpsTaskParams);
++    gpsTaskParams.stackSize = GPS_TASK_STACK_SIZE;
++    gpsTaskParams.priority = GPS_TASK_PRIORITY;
++    gpsTaskParams.stack = &gpsTaskStack;
++    Task_construct(&gpsTask, gpsTaskFunction, &gpsTaskParams, NULL);
++
++    UART_init();
++
++    /* Create a UART with data processing off. */
++    UART_Params_init(&uartParams);
++    uartParams.writeDataMode = UART_DATA_BINARY;
++    uartParams.readDataMode = UART_DATA_BINARY;
++    uartParams.readReturnMode = UART_RETURN_FULL;
++    uartParams.readEcho = UART_ECHO_OFF;
++    uartParams.baudRate = 9600;
++    uartParams.readTimeout = 500000 / Clock_tickPeriod;
++
++    uart = UART_open(Board_UART0, &uartParams);
++
++    if (uart == NULL) {
++        /* UART_open() failed */
++        while (1);
++    }
++
++}
++
++void gpsReportingIntervalDecrement(void)
++{
++        Clock_stop(gpsReportTimeoutClockHandle);
++        if(currentInterval > 0)
++            currentInterval--;
++        /* setup period for fast report and uart timeout */
++        Clock_setTimeout(gpsReportTimeoutClockHandle, gpsReportingIntervalMs[currentInterval] * 1000 / Clock_tickPeriod);
++        /* start fast report and timeout */
++        Clock_start(gpsReportTimeoutClockHandle);
++}
++
++void gpsReportingIntervalIncrement(void)
++{
++        Clock_stop(gpsReportTimeoutClockHandle);
++        if(currentInterval < 5)
++            currentInterval++;
++        /* setup period for fast report timeout */
++        Clock_setTimeout(gpsReportTimeoutClockHandle, gpsReportingIntervalMs[currentInterval] * 1000 / Clock_tickPeriod);
++        /* start fast report and timeout */
++        Clock_start(gpsReportTimeoutClockHandle);
++}
++
++void gpsReportTimeoutCallback(UArg arg0)
++{
++    Semaphore_post(gpsSemHandle);
++}
++
++static void gpsTaskFunction(UArg arg0, UArg arg1)
++{
++    /* Open LED pins */
++    gpsPinHandle = PIN_open(&gpsPinState, gpsPinTable);
++    if (!gpsPinHandle)
++    {
++        System_abort("Error initializing board 3.3V domain pins\n");
++    }
++
++    /* setup timeout for fast report timeout */
++    Clock_setTimeout(gpsReportTimeoutClockHandle, gpsReportingIntervalMs[currentInterval] * 1000 / Clock_tickPeriod);
++    Clock_start(gpsReportTimeoutClockHandle);
++
++    uint8_t status = GPS_STATUS_ERROR;
++
++    while(1)
++    {
++        Semaphore_pend(gpsSemHandle, BIOS_WAIT_FOREVER);
++
++        Clock_stop(gpsReportTimeoutClockHandle);
++
++        /* Get GPS value */
++        status = readGPS(&latestGpsData);
++
++        if(status == GPS_STATUS_SUCCESS)
++        {
++            uint8_t events = Event_getPostedEvents(nodeEventHandle);
++            if(events != NODE_EVENT_NEW_GPS_VALUE)
++                Event_post(nodeEventHandle, NODE_EVENT_NEW_GPS_VALUE);
++        }
++
++        Clock_start(gpsReportTimeoutClockHandle);
++
++    }
++}
++
++uint8_t readGPS(struct gpsData_s* gpsData)
++{
++    struct gpsDataUART_s uartData;
++
++    char input;
++    uint8_t gpsStatus = 0;
++
++    uint8_t i = 0;
++    uint8_t data = 0;
++    uint8_t count = 0;
++    char *ptr = uartData.time.h;//lat.DM;
++
++    UART_control(uart, UARTCC26XX_CMD_RX_FIFO_FLUSH, 0);
++
++    while(!gpsStatus)
++    {
++        while(input != '$')
++        {
++            UART_read(uart, &input, 1);
++        }
++
++        while(count < 6)
++        {
++            UART_read(uart, &input, 1);
++
++            switch(input)
++            {
++                case 'G':
++                    if(count == 0 || count == 2 || count == 3)
++                        count++;
++                    else
++                        count = 0;
++                    break;
++                case 'P':
++                    if(count == 1)
++                        count++;
++                    else
++                        count = 0;
++                    break;
++                case 'A':
++                    if(count == 4)
++                        count++;
++                    else
++                        count = 0;
++                    break;
++                case ',':
++                    if(count == 5)
++                        count++;
++                    else
++                        count = 0;
++                    break;
++                default:
++                        count = 0;
++                    break;
++            }
++        }
++
++        UART_read(uart, &input, 1);
++
++        i = 0;
++
++        if(input != ',')    // if data is valid
++        {
++            while(data < 9)
++            {
++                if(input != ',')
++                {
++                    switch (data)
++                    {
++                        case 0:
++                            if(i == 2 || i == 4 || i == 6)
++                                ptr+=2;
++                            if(input != '.')
++                            {
++                                *ptr = input;
++                                ptr++;
++                            }
++                            else
++                                ptr = uartData.lat.DM;
++                        case 1:
++                            if(input != '.')
++                            {
++                                *ptr = input;
++                                ptr++;
++                            }
++                            else
++                                ptr = uartData.lat.m;
++                            break;
++                        case 2:
++                            uartData.lat.dir = input;
++                            ptr = uartData.lng.DM;
++                            break;
++                        case 3:
++                            if(input != '.')
++                            {
++                                *ptr = input;
++                                ptr++;
++                            }
++                            else
++                                ptr = uartData.lng.m;
++                            break;
++                        case 4:
++                            uartData.lng.dir = input;
++                            ptr = uartData.alt.A;
++                            break;
++                        case 8:
++                            if(input != '.')
++                            {
++                                *ptr = input;
++                                ptr++;
++                            }
++                            else
++                                ptr = uartData.alt.a;
++                            break;
++                        default:
++                            break;
++                    }
++                    i++;
++                }
++                else
++                {
++                    i = 0;
++                    data++;
++                }
++
++                UART_read(uart, &input, 1);
++            }
++
++            // Parse GPS Data
++            uint16_t temp = atoi(uartData.lat.DM);
++            if(uartData.lat.dir == 'S')
++                gpsData->lat.DM = (uint8_t)temp*(-1);
++            else
++                gpsData->lat.DM = temp;
++
++            gpsData->lat.m = atol(uartData.lat.m);
++
++            temp = atoi(uartData.lng.DM);
++            if(uartData.lng.dir == 'W')
++                gpsData->lng.DM = temp*(-1);
++            else
++                gpsData->lng.DM = temp;
++
++            gpsData->lng.m = atol(uartData.lng.m);
++
++            gpsData->alt.A = atoi(uartData.alt.A);
++            gpsData->alt.a = atoi(uartData.alt.a);
++
++            gpsData->time.h = atoi(uartData.time.h);
++            gpsData->time.m = atoi(uartData.time.m);
++            gpsData->time.s = atoi(uartData.time.s);
++
++            gpsStatus = GPS_STATUS_SUCCESS;
++        }
++        else
++            gpsStatus = GPS_STATUS_ERROR;
++    }
++
++    return gpsStatus;
++}
++
++/***** Function definitions *****/
++enum NodeRadioOperationStatus NodeRadioTask_sendGpsData(void)
++{
++    enum NodeRadioOperationStatus status;
++
++    /* Get radio access sempahore */
++    Semaphore_pend(radioAccessSemHandle, BIOS_WAIT_FOREVER);
++
++    /* Save data to send */
++    gpsData = latestGpsData;
++
++    /* Raise RADIO_EVENT_SEND_ADC_DATA event */
++    Event_post(radioOperationEventHandle, RADIO_EVENT_SEND_GPS_DATA);
++
++    /* Wait for result */
++    Semaphore_pend(radioResultSemHandle, BIOS_WAIT_FOREVER);
++
++    /* Get result */
++    status = currentRadioOperation.result;
++
++    /* Return radio access semaphore */
++    Semaphore_post(radioAccessSemHandle);
++
++    return status;
++}
++
++void sendGpsPacket(struct gpsSensorPacket_s sensorPacket, uint8_t maxNumberOfRetries, uint32_t ackTimeoutMs)
++{
++    /* Set destination address in EasyLink API */
++    currentRadioOperation.easyLinkTxPacket.dstAddr[0] = RADIO_CONCENTRATOR_ADDRESS;
++
++    /* Copy GPS packet to payload
++     * Note that the EasyLink API will implcitily both add the length byte and the destination address byte. */
++    currentRadioOperation.easyLinkTxPacket.payload[0] = sensorPacket.header.sourceAddress;
++    currentRadioOperation.easyLinkTxPacket.payload[1] = sensorPacket.header.packetType;
++    currentRadioOperation.easyLinkTxPacket.payload[2] = (sensorPacket.gpsData.lat.DM & 0xFF00) >> 8;
++    currentRadioOperation.easyLinkTxPacket.payload[3] = (sensorPacket.gpsData.lat.DM & 0xFF);
++    currentRadioOperation.easyLinkTxPacket.payload[4] = (sensorPacket.gpsData.lat.m & 0xFF0000) >> 16;
++    currentRadioOperation.easyLinkTxPacket.payload[5] = (sensorPacket.gpsData.lat.m & 0xFF00) >> 8;
++    currentRadioOperation.easyLinkTxPacket.payload[6] = (sensorPacket.gpsData.lat.m & 0xFF);
++    currentRadioOperation.easyLinkTxPacket.payload[7] = (sensorPacket.gpsData.lng.DM & 0xFF00) >> 8;
++    currentRadioOperation.easyLinkTxPacket.payload[8] = (sensorPacket.gpsData.lng.DM & 0xFF);
++    currentRadioOperation.easyLinkTxPacket.payload[9] = (sensorPacket.gpsData.lng.m & 0xFF0000) >> 16;
++    currentRadioOperation.easyLinkTxPacket.payload[10] = (sensorPacket.gpsData.lng.m & 0xFF00) >> 8;
++    currentRadioOperation.easyLinkTxPacket.payload[11] = (sensorPacket.gpsData.lng.m & 0xFF);
++    currentRadioOperation.easyLinkTxPacket.payload[12] = (sensorPacket.gpsData.alt.A & 0xFF00) >> 8;
++    currentRadioOperation.easyLinkTxPacket.payload[13] = (sensorPacket.gpsData.alt.A & 0xFF);
++    currentRadioOperation.easyLinkTxPacket.payload[14] = sensorPacket.gpsData.alt.a;
++    currentRadioOperation.easyLinkTxPacket.payload[15] = sensorPacket.gpsData.time.h;
++    currentRadioOperation.easyLinkTxPacket.payload[16] = sensorPacket.gpsData.time.m;
++    currentRadioOperation.easyLinkTxPacket.payload[17] = sensorPacket.gpsData.time.s;
++
++    currentRadioOperation.easyLinkTxPacket.len = sizeof(struct gpsSensorPacket_s);
++
++    /* Setup retries */
++    currentRadioOperation.maxNumberOfRetries = maxNumberOfRetries;
++    currentRadioOperation.ackTimeoutMs = ackTimeoutMs;
++    currentRadioOperation.retriesDone = 0;
++    EasyLink_setCtrl(EasyLink_Ctrl_AsyncRx_TimeOut, EasyLink_ms_To_RadioTime(ackTimeoutMs));
++
++    /* Send packet  */
++    if (EasyLink_transmit(&currentRadioOperation.easyLinkTxPacket) != EasyLink_Status_Success)
++    {
++        System_abort("EasyLink_transmit failed");
++    }
++
++    /* Enter RX */
++    if (EasyLink_receiveAsync(rxDoneCallback, 0) != EasyLink_Status_Success)
++    {
++        System_abort("EasyLink_receiveAsync failed");
++    }
++}
+diff -urN NodeGPS.h node_new/NodeGPS.h
+--- NodeGPS.h	1969-12-31 18:00:00.000000000 -0600
++++ node_new/NodeGPS.h	2017-07-07 13:16:49.792561400 -0500
+@@ -0,0 +1,128 @@
++/*
++ * Copyright (c) 2015, Texas Instruments Incorporated
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * *  Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ *
++ * *  Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * *  Neither the name of Texas Instruments Incorporated nor the names of
++ *    its contributors may be used to endorse or promote products derived
++ *    from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef TASKS_NODEGPS_H_
++#define TASKS_NODEGPS_H_
++
++#include "NodeRadioTask.h"
++#include "NodeTask.h"
++
++#define NODE_EVENT_NEW_GPS_VALUE    (uint32_t)(1 << 1)
++#define RADIO_EVENT_SEND_GPS_DATA       (uint32_t)(1 << 4)
++
++struct gpsDataUART_s {
++    struct ulat_s {
++        char DM[4];
++        char m[7];
++        char dir;
++    } lat;
++
++    struct ulng_s {
++        char DM[5];
++        char m[7];
++        char dir;
++    } lng;
++
++    struct ualt_s
++    {
++        char A[8];
++        char a[4];
++    } alt;
++
++    struct utime_s {
++        char h[4];
++        char m[4];
++        char s[4];
++    } time;
++};
++//
++///* GPS Lat/Lng data in Degrees Minutes (DM), where D is signed */
++//struct gpsData_s {
++//    struct glat_s   // DM = [0][1:3]
++//    {
++//        int8_t D;
++//        uint32_t M;
++//    } lat;
++//    struct glng_s  // DM = [0:1][2:4]
++//    {
++//        int16_t D;
++//        uint32_t M;
++//    } lng;
++//    struct time_s  // h.m.s (UTC) = [0].[1].[2]
++//    {
++//        uint8_t h;
++//        uint8_t m;
++//        uint8_t s;
++//    } time;
++//};
++
++/* GPS Lat/Lng data in Degrees Minutes (DM), where D is signed */
++struct gpsData_s {
++    struct glat_s   // DM.m = [0:1].[2:4]
++    {
++        int16_t DM;
++        uint32_t m;
++    } lat;
++
++    struct glng_s  // DM = [0:1].[2:4]
++    {
++        int16_t DM;
++        uint32_t m;
++    } lng;
++
++    struct alt_s
++    {
++        uint16_t A; // altitude: A.a Meters
++        uint8_t a;
++    } alt;
++
++    struct time_s  // h.m.s (UTC) = [0].[1].[2]
++    {
++        uint8_t h;
++        uint8_t m;
++        uint8_t s;
++    } time;
++};
++
++struct gpsSensorPacket_s {
++    struct PacketHeader header;
++    struct gpsData_s gpsData;
++};
++
++/* Initializes the Node Task and creates all TI-RTOS objects */
++void gpsTask_init(void);
++void gpsReportingIntervalDecrement(void);
++void gpsReportingIntervalIncrement(void);
++enum NodeRadioOperationStatus NodeRadioTask_sendGpsData(void);
++void sendGpsPacket(struct gpsSensorPacket_s sensorPacket, uint8_t maxNumberOfRetries, uint32_t ackTimeoutMs);
++
++#endif /* TASKS_NODEGPS_H_ */
+diff -urN NodeRadioTask.c node_new/NodeRadioTask.c
+--- NodeRadioTask.c	2017-09-11 10:38:35.698000000 -0500
++++ node_new/NodeRadioTask.c	2017-07-07 16:02:52.797107300 -0500
+@@ -54,6 +54,8 @@
+ #include "RadioProtocol.h"
+ #include "NodeRadioTask.h"
+ 
++#include "NodeGPS.h"
++
+ #ifdef DEVICE_FAMILY
+     #undef DEVICE_FAMILY_PATH
+     #define DEVICE_FAMILY_PATH(x) <ti/devices/DEVICE_FAMILY/x>
+@@ -92,16 +94,18 @@
+ Task_Struct nodeRadioTask;        /* not static so you can see in ROV */
+ static uint8_t nodeRadioTaskStack[NODERADIO_TASK_STACK_SIZE];
+ Semaphore_Struct radioAccessSem;  /* not static so you can see in ROV */
+-static Semaphore_Handle radioAccessSemHandle;
++Semaphore_Handle radioAccessSemHandle;
+ Event_Struct radioOperationEvent; /* not static so you can see in ROV */
+-static Event_Handle radioOperationEventHandle;
++Event_Handle radioOperationEventHandle;
+ Semaphore_Struct radioResultSem;  /* not static so you can see in ROV */
+-static Semaphore_Handle radioResultSemHandle;
+-static struct RadioOperation currentRadioOperation;
++Semaphore_Handle radioResultSemHandle;
++struct RadioOperation currentRadioOperation;
+ static uint16_t adcData;
+ static uint8_t nodeAddress = 0;
+ static struct DualModeSensorPacket dmSensorPacket;
+ 
++static struct gpsData_s gpsData;
++static struct gpsSensorPacket_s gpsSensorPacket;
+ 
+ /* previous Tick count used to calculate uptime for the Sub1G packet */
+ static uint32_t prevTicks;
+@@ -114,7 +118,7 @@
+ static void returnRadioOperationStatus(enum NodeRadioOperationStatus status);
+ static void sendDmPacket(struct DualModeSensorPacket sensorPacket, uint8_t maxNumberOfRetries, uint32_t ackTimeoutMs);
+ static void resendPacket();
+-static void rxDoneCallback(EasyLink_RxPacket * rxPacket, EasyLink_Status status);
++void rxDoneCallback(EasyLink_RxPacket * rxPacket, EasyLink_Status status);
+ 
+ /***** Function definitions *****/
+ void NodeRadioTask_init(void) {
+@@ -155,7 +159,6 @@
+      * the below API
+      * EasyLink_setFrequency(868000000);
+      */
+-
+     /* Use the True Random Number Generator to generate sensor node address randomly */;
+     Power_setDependency(PowerCC26XX_PERIPH_TRNG);
+     TRNGEnable();
+@@ -181,6 +184,9 @@
+     dmSensorPacket.header.sourceAddress = nodeAddress;
+     dmSensorPacket.header.packetType = RADIO_PACKET_TYPE_DM_SENSOR_PACKET;
+ 
++    /* Setup GPS sensor packet */
++    gpsSensorPacket.header.sourceAddress = nodeAddress;
++    gpsSensorPacket.header.packetType = RADIO_PACKET_TYPE_GPS_SENSOR_PACKET;
+ 
+     /* Initialise previous Tick count used to calculate uptime for the TLM beacon */
+     prevTicks = Clock_getTicks();
+@@ -214,13 +220,19 @@
+             dmSensorPacket.adcValue = adcData;
+             dmSensorPacket.button = !PIN_getInputValue(Board_PIN_BUTTON0);
+ 
+-
+             sendDmPacket(dmSensorPacket, NODERADIO_MAX_RETRIES, NORERADIO_ACK_TIMEOUT_TIME_MS);
+         }
+ 
++        if (events & RADIO_EVENT_SEND_GPS_DATA)
++        {
++            gpsSensorPacket.gpsData = gpsData;
++            sendGpsPacket(gpsSensorPacket, NODERADIO_MAX_RETRIES, 300);
++        }
++
+         /* If we get an ACK from the concentrator */
+         if (events & RADIO_EVENT_DATA_ACK_RECEIVED)
+         {
++            PIN_setOutputValue(ledPinHandle, Board_PIN_GLED, 1);
+             returnRadioOperationStatus(NodeRadioStatus_Success);
+         }
+ 
+@@ -243,6 +255,7 @@
+         /* If send fail */
+         if (events & RADIO_EVENT_SEND_FAIL)
+         {
++            PIN_setOutputValue(ledPinHandle, Board_PIN_GLED, 0);
+             returnRadioOperationStatus(NodeRadioStatus_Failed);
+         }
+ 
+@@ -341,7 +354,7 @@
+     currentRadioOperation.retriesDone++;
+ }
+ 
+-static void rxDoneCallback(EasyLink_RxPacket * rxPacket, EasyLink_Status status)
++void rxDoneCallback(EasyLink_RxPacket * rxPacket, EasyLink_Status status)
+ {
+     struct PacketHeader* packetHeader;
+ 
+diff -urN NodeRadioTask.h node_new/NodeRadioTask.h
+--- NodeRadioTask.h	2017-09-11 10:38:35.698000000 -0500
++++ node_new/NodeRadioTask.h	2017-07-07 13:16:49.815061400 -0500
+@@ -34,6 +34,7 @@
+ #define TASKS_NODERADIOTASKTASK_H_
+ 
+ #include "stdint.h"
++#include "RadioProtocol.h"
+ 
+ #define NODE_ACTIVITY_LED Board_PIN_LED0
+ 
+diff -urN NodeTask.c node_new/NodeTask.c
+--- NodeTask.c	2017-09-11 10:38:35.708000000 -0500
++++ node_new/NodeTask.c	2017-07-07 13:16:49.825061400 -0500
+@@ -50,6 +50,7 @@
+ #include "NodeTask.h"
+ #include "NodeRadioTask.h"
+ 
++#include "NodeGPS.h"
+ 
+ /***** Defines *****/
+ #define NODE_TASK_STACK_SIZE 1024
+@@ -67,14 +68,12 @@
+ #define NODE_ADCTASK_REPORTINTERVAL_FAST                1
+ #define NODE_ADCTASK_REPORTINTERVAL_FAST_DURIATION_MS   30000
+ 
+-
+-
+ /***** Variable declarations *****/
+ static Task_Params nodeTaskParams;
+ Task_Struct nodeTask;    /* not static so you can see in ROV */
+ static uint8_t nodeTaskStack[NODE_TASK_STACK_SIZE];
+ Event_Struct nodeEvent;  /* not static so you can see in ROV */
+-static Event_Handle nodeEventHandle;
++Event_Handle nodeEventHandle;
+ static uint16_t latestAdcValue;
+ 
+ /* Clock for the fast report timeout */
+@@ -83,13 +82,14 @@
+ 
+ /* Pin driver handle */
+ static PIN_Handle buttonPinHandle;
+-static PIN_Handle ledPinHandle;
++PIN_Handle ledPinHandle;
+ static PIN_State buttonPinState;
+ static PIN_State ledPinState;
+ 
+ /* Enable the 3.3V power domain used by the LCD */
+ PIN_Config pinTable[] = {
+     NODE_ACTIVITY_LED | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,
++    Board_PIN_GLED | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,
+     PIN_TERMINATE
+ };
+ 
+@@ -99,6 +99,7 @@
+  */
+ PIN_Config buttonPinTable[] = {
+     Board_PIN_BUTTON0  | PIN_INPUT_EN | PIN_PULLUP | PIN_IRQ_NEGEDGE,
++    Board_PIN_BUTTON1  | PIN_INPUT_EN | PIN_PULLUP | PIN_IRQ_NEGEDGE,
+     PIN_TERMINATE
+ };
+ 
+@@ -108,11 +109,9 @@
+ void adcCallback(uint16_t adcValue);
+ void buttonCallback(PIN_Handle handle, PIN_Id pinId);
+ 
+-
+ /***** Function definitions *****/
+ void NodeTask_init(void)
+ {
+-
+     /* Create event used internally for state changes */
+     Event_Params eventParam;
+     Event_Params_init(&eventParam);
+@@ -143,6 +142,7 @@
+         System_abort("Error initializing board 3.3V domain pins\n");
+     }
+ 
++#ifndef GPS
+     /* Start the SCE ADC task with 1s sample period and reacting to change in ADC value. */
+     SceAdc_init(0x00010000, NODE_ADCTASK_REPORTINTERVAL_FAST, NODE_ADCTASK_CHANGE_MASK);
+     SceAdc_registerAdcCallback(adcCallback);
+@@ -154,7 +154,7 @@
+ 
+     /* start fast report and timeout */
+     Clock_start(fastReportTimeoutClockHandle);
+-
++#endif
+ 
+     buttonPinHandle = PIN_open(&buttonPinState, buttonPinTable);
+     if (!buttonPinHandle)
+@@ -169,6 +169,7 @@
+     }
+ 
+     while(1) {
++
+         /* Wait for event */
+         uint32_t events = Event_pend(nodeEventHandle, 0, NODE_EVENT_ALL, BIOS_WAIT_FOREVER);
+ 
+@@ -180,6 +181,14 @@
+             /* Send ADC value to concentrator */
+             NodeRadioTask_sendAdcData(latestAdcValue);
+         }
++
++        if (events & NODE_EVENT_NEW_GPS_VALUE) {
++            /* Toggle activity LED */
++            PIN_setOutputValue(ledPinHandle, NODE_ACTIVITY_LED,!PIN_getOutputValue(NODE_ACTIVITY_LED));
++
++            /* Send GPS value to concentrator */
++            NodeRadioTask_sendGpsData();
++        }
+     }
+ }
+ 
+@@ -201,12 +210,22 @@
+     /* Debounce logic, only toggle if the button is still pushed (low) */
+     CPUdelay(8000*50);
+ 
+-
+     if (PIN_getInputValue(Board_PIN_BUTTON0) == 0)
+     {
++#ifdef GPS
++        gpsReportingIntervalDecrement();
++#else
+         //start fast report and timeout
+         SceAdc_setReportInterval(NODE_ADCTASK_REPORTINTERVAL_FAST, NODE_ADCTASK_CHANGE_MASK);
+         Clock_start(fastReportTimeoutClockHandle);
++#endif
++    }
++
++    if (PIN_getInputValue(Board_PIN_BUTTON1) == 0)
++    {
++#ifdef GPS
++        gpsReportingIntervalIncrement();
++#endif
+     }
+ }
+ 
+diff -urN RadioProtocol.h node_new/RadioProtocol.h
+--- RadioProtocol.h	2017-09-11 10:38:35.538000000 -0500
++++ node_new/RadioProtocol.h	2017-07-07 13:16:49.850061400 -0500
+@@ -37,11 +37,12 @@
+ #include "easylink/EasyLink.h"
+ 
+ #define RADIO_CONCENTRATOR_ADDRESS     0x00
+-#define RADIO_EASYLINK_MODULATION     EasyLink_Phy_Custom
++#define RADIO_EASYLINK_MODULATION     EasyLink_Phy_5kbpsSlLr
+ 
+ #define RADIO_PACKET_TYPE_ACK_PACKET             0
+ #define RADIO_PACKET_TYPE_ADC_SENSOR_PACKET      1
+ #define RADIO_PACKET_TYPE_DM_SENSOR_PACKET       2
++#define RADIO_PACKET_TYPE_GPS_SENSOR_PACKET      4
+ 
+ struct PacketHeader {
+     uint8_t sourceAddress;
+diff -urN rfWsnNode.c node_new/rfWsnNode.c
+--- rfWsnNode.c	2017-09-11 10:38:35.728000000 -0500
++++ node_new/rfWsnNode.c	2017-07-10 08:19:04.422772600 -0500
+@@ -45,7 +45,8 @@
+ 
+ #include "NodeRadioTask.h"
+ #include "NodeTask.h"
+-
++#include "NodeGPS.h"
++#include "board_palna.h"
+ 
+ /*
+  *  ======== main ========
+@@ -59,6 +60,12 @@
+     /* Initialize sensor node tasks */
+     NodeRadioTask_init();
+     NodeTask_init();
++#ifdef GPS
++    gpsTask_init();
++#endif
++#ifdef CC1310_CC1190_LP
++    Board_Palna_initialize(1);
++#endif
+ 
+     /* Start BIOS */
+     BIOS_start();

@@ -1,0 +1,481 @@
+diff -urN collector.c collector_new/collector.c
+--- collector.c	2017-09-11 10:19:01.093000000 -0500
++++ collector_new/collector.c	2017-06-27 12:31:46.794033500 -0500
+@@ -57,6 +57,10 @@
+ #include "smsgs.h"
+ #include "collector.h"
+ 
++#ifdef GPS_SENSOR
++#include "gps_collector.h"
++#endif
++
+ /******************************************************************************
+  Constants and definitions
+  *****************************************************************************/
+@@ -90,6 +94,7 @@
+ #define CONFIG_FRAME_CONTROL (Smsgs_dataFields_tempSensor | \
+                               Smsgs_dataFields_lightSensor | \
+                               Smsgs_dataFields_humiditySensor | \
++                              Smsgs_dataFields_gpsSensor | \
+                               Smsgs_dataFields_msgStats | \
+                               Smsgs_dataFields_configSettings)
+ 
+@@ -974,6 +979,24 @@
+         pBuf += 2;
+     }
+ 
++    if(sensorData.frameControl & Smsgs_dataFields_gpsSensor)
++    {
++        sensorData.gpsSensor.lat.DM = Util_buildUint16(pBuf[0], pBuf[1]);
++        sensorData.gpsSensor.lat.m = Util_buildUint32(pBuf[2], pBuf[3], pBuf[4], 0);
++        sensorData.gpsSensor.lng.DM = Util_buildUint16(pBuf[5], pBuf[6]);
++        sensorData.gpsSensor.lng.m = Util_buildUint32(pBuf[7], pBuf[8], pBuf[9], 0);
++        sensorData.gpsSensor.alt.A = Util_buildUint16(pBuf[10], pBuf[11]);
++        sensorData.gpsSensor.alt.a = pBuf[12];
++        sensorData.gpsSensor.time.h = pBuf[13];
++        sensorData.gpsSensor.time.m = pBuf[14];
++        sensorData.gpsSensor.time.s = pBuf[15];
++
++        if(sensorData.gpsSensor.time.h != 0xFF)
++            gpsUpdateData(pDataInd->srcAddr.addr.shortAddr, pDataInd->rssi, sensorData.gpsSensor);
++
++        pBuf += 16;
++    }
++
+     if(sensorData.frameControl & Smsgs_dataFields_msgStats)
+     {
+         sensorData.msgStats.joinAttempts = Util_buildUint16(pBuf[0], pBuf[1]);
+diff -urN config.h collector_new/config.h
+--- config.h	2017-09-11 10:19:01.103000000 -0500
++++ collector_new/config.h	2017-07-10 10:03:19.500742800 -0500
+@@ -49,6 +49,8 @@
+ /******************************************************************************
+  Includes
+  *****************************************************************************/
++#include <api_mac.h>
++#include <features.h>
+ 
+ #ifdef __cplusplus
+ extern "C"
+@@ -88,7 +90,7 @@
+ #define CONFIG_MAC_SUPERFRAME_ORDER  15
+ 
+ /*! Setting for Phy ID */
+-#define CONFIG_PHY_ID                (APIMAC_STD_US_915_PHY_1)
++#define CONFIG_PHY_ID                (APIMAC_GENERIC_US_LRM_915_PHY_129)
+ 
+ #if ((CONFIG_PHY_ID >= APIMAC_MRFSK_STD_PHY_ID_BEGIN) && (CONFIG_PHY_ID <= APIMAC_MRFSK_STD_PHY_ID_END))
+ /*! Setting for channel page */
+@@ -119,7 +121,7 @@
+  #define CONFIG_RANGE_EXT_MODE       APIMAC_HIGH_GAIN_MODE
+ */
+ #define CONFIG_RANGE_EXT_MODE       APIMAC_NO_EXTENDER
+-
++//#define CONFIG_RANGE_EXT_MODE       APIMAC_HIGH_GAIN_MODE
+ /*! Setting Default Key*/
+ #define KEY_TABLE_DEFAULT_KEY {0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,\
+                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+diff -urN gps_collector.c collector_new/gps_collector.c
+--- gps_collector.c	1969-12-31 18:00:00.000000000 -0600
++++ collector_new/gps_collector.c	2017-06-27 12:31:46.804033700 -0500
+@@ -0,0 +1,181 @@
++/******************************************************************************
++
++ @file gps_collector.c
++
++ @brief TIMAC 2.0 Collector GPS Application
++
++ Group: WCS LPC
++ Target Device: CC13xx
++
++ ******************************************************************************
++
++ Copyright (c) 2016-2017, Texas Instruments Incorporated
++ All rights reserved.
++
++ Redistribution and use in source and binary forms, with or without
++ modification, are permitted provided that the following conditions
++ are met:
++
++ *  Redistributions of source code must retain the above copyright
++    notice, this list of conditions and the following disclaimer.
++
++ *  Redistributions in binary form must reproduce the above copyright
++    notice, this list of conditions and the following disclaimer in the
++    documentation and/or other materials provided with the distribution.
++
++ *  Neither the name of Texas Instruments Incorporated nor the names of
++    its contributors may be used to endorse or promote products derived
++    from this software without specific prior written permission.
++
++ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++ ******************************************************************************
++ Release Name: simplelink_cc13x0_sdk_1_30_00_06"
++ Release Date: 2017-03-08 14:43:30
++ *****************************************************************************/
++
++/******************************************************************************
++ Includes
++ *****************************************************************************/
++#include <string.h>
++#include <stdint.h>
++
++#include <xdc/std.h>
++#include <xdc/runtime/System.h>
++
++#include <ti/sysbios/BIOS.h>
++#include <ti/sysbios/knl/Task.h>
++#include <ti/sysbios/knl/Semaphore.h>
++#include <ti/sysbios/knl/Clock.h>
++#include <ti/drivers/UART.h>
++
++#include "board.h"
++#include "util.h"
++#include "api_mac.h"
++#include "cllc.h"
++#include "csf.h"
++#include "smsgs.h"
++#include "collector.h"
++#include "gps_collector.h"
++
++/******************************************************************************
++ Constants and definitions
++ *****************************************************************************/
++#define GPS_TASK_STACK_SIZE 1024
++#define GPS_TASK_PRIORITY   2
++
++/******************************************************************************
++ Global variables
++ *****************************************************************************/
++UART_Handle uart_gps;
++UART_Params uartParams_gps;
++
++Semaphore_Struct gpsSemStruct;
++Semaphore_Handle gpsSemHandle;
++
++
++/******************************************************************************
++ Local variables
++ *****************************************************************************/
++static Task_Params gpsTaskParams;
++Task_Struct gpsTask;    /* not static so you can see in ROV */
++static uint8_t gpsTaskStack[GPS_TASK_STACK_SIZE];
++
++static struct gpsSensorNode latestGpsNode;
++
++/******************************************************************************
++ Local function prototypes
++ *****************************************************************************/
++static void gpsTaskFunction(UArg arg0, UArg arg1);
++static void gpsUpdatePC(struct gpsSensorNode* node);
++
++/******************************************************************************
++ Public Functions
++ *****************************************************************************/
++void gpsTask_init(void)
++{
++    /* Construct a Semaphore object */
++    Semaphore_Params semParams;
++    Semaphore_Params_init(&semParams);
++    Semaphore_construct(&gpsSemStruct, 0, &semParams);
++    gpsSemHandle = Semaphore_handle(&gpsSemStruct);
++
++    /* Create the GPS task */
++    Task_Params_init(&gpsTaskParams);
++    gpsTaskParams.stackSize = GPS_TASK_STACK_SIZE;
++    gpsTaskParams.priority = GPS_TASK_PRIORITY;
++    gpsTaskParams.stack = &gpsTaskStack;
++    Task_construct(&gpsTask, gpsTaskFunction, &gpsTaskParams, NULL);
++
++    UART_init();
++
++    /* Create a UART with data processing off. */
++    UART_Params_init(&uartParams_gps);
++    uartParams_gps.writeDataMode = UART_DATA_BINARY;
++    uartParams_gps.readDataMode = UART_DATA_BINARY;
++    uartParams_gps.readReturnMode = UART_RETURN_FULL;
++    uartParams_gps.readEcho = UART_ECHO_OFF;
++    uartParams_gps.baudRate = 115200;
++    uartParams_gps.readTimeout = 500000 / Clock_tickPeriod;
++
++    uart_gps = UART_open(Board_UART0, &uartParams_gps);
++
++    if (uart_gps == NULL) {
++        /* UART_open() failed */
++        while (1);
++    }
++
++}
++
++static void gpsTaskFunction(UArg arg0, UArg arg1)
++{
++    while(1)
++    {
++        Semaphore_pend(gpsSemHandle, BIOS_WAIT_FOREVER);
++
++        /* Send GPS node data through UART */
++        gpsUpdatePC(&latestGpsNode);
++    }
++}
++
++void gpsUpdateData(uint16_t address, int8_t rssi, Smsgs_gpsSensorField_t gpsData)
++{
++    latestGpsNode.address = address;
++    latestGpsNode.rssi = rssi;
++    latestGpsNode.gpsData = gpsData;
++
++    Semaphore_post(gpsSemHandle);
++}
++
++/******************************************************************************
++ Local Functions
++ *****************************************************************************/
++
++static void gpsUpdatePC(struct gpsSensorNode* node)
++{
++    char s = '$';
++    char n = '\n';
++    UART_write(uart_gps, &s, 1);
++    UART_write(uart_gps, &node->address, 1);
++    UART_write(uart_gps, &node->rssi, 1);
++    UART_write(uart_gps, &node->gpsData.lat.DM, 2);
++    UART_write(uart_gps, &node->gpsData.lat.m, 3);
++    UART_write(uart_gps, &node->gpsData.lng.DM, 2);
++    UART_write(uart_gps, &node->gpsData.lng.m, 3);
++    UART_write(uart_gps, &node->gpsData.alt.A, 2);
++    UART_write(uart_gps, &node->gpsData.alt.a, 1);
++    UART_write(uart_gps, &node->gpsData.time.h, 1);
++    UART_write(uart_gps, &node->gpsData.time.m, 1);
++    UART_write(uart_gps, &node->gpsData.time.s, 1);
++    UART_write(uart_gps, &n, 1);
++}
+diff -urN gps_collector.h collector_new/gps_collector.h
+--- gps_collector.h	1969-12-31 18:00:00.000000000 -0600
++++ collector_new/gps_collector.h	2017-06-27 12:31:46.804033700 -0500
+@@ -0,0 +1,97 @@
++/******************************************************************************
++
++ @file gps_collector.h
++
++ @brief TIMAC 2.0 Collector GPS Application Header
++
++ Group: WCS LPC
++ Target Device: CC13xx
++
++ ******************************************************************************
++
++ Copyright (c) 2016-2017, Texas Instruments Incorporated
++ All rights reserved.
++
++ Redistribution and use in source and binary forms, with or without
++ modification, are permitted provided that the following conditions
++ are met:
++
++ *  Redistributions of source code must retain the above copyright
++    notice, this list of conditions and the following disclaimer.
++
++ *  Redistributions in binary form must reproduce the above copyright
++    notice, this list of conditions and the following disclaimer in the
++    documentation and/or other materials provided with the distribution.
++
++ *  Neither the name of Texas Instruments Incorporated nor the names of
++    its contributors may be used to endorse or promote products derived
++    from this software without specific prior written permission.
++
++ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
++ CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++ PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
++ OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++ WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
++ OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
++ EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++ ******************************************************************************
++ Release Name: simplelink_cc13x0_sdk_1_30_00_06"
++ Release Date: 2017-03-08 14:43:30
++ *****************************************************************************/
++#ifndef GPS_COLLECTOR_H
++#define GPS_COLLECTOR_H
++
++/******************************************************************************
++ Includes
++ *****************************************************************************/
++
++#include <stdbool.h>
++#include <stdint.h>
++
++#include "api_mac.h"
++#include "smsgs.h"
++#include "collector.h"
++
++
++#ifdef __cplusplus
++extern "C"
++{
++#endif
++
++/******************************************************************************
++ Constants and definitions
++ *****************************************************************************/
++//#undef USE_UART_PRINTF
++
++/******************************************************************************
++ Structures
++ *****************************************************************************/
++struct gpsSensorNode {
++    uint8_t address;
++    int8_t rssi;
++    Smsgs_gpsSensorField_t gpsData;
++};
++
++
++/******************************************************************************
++ Global Variables
++ *****************************************************************************/
++
++
++/******************************************************************************
++ Function Prototypes
++ *****************************************************************************/
++void gpsTask_init(void);
++void gpsUpdateData(uint16_t address, int8_t rssi, Smsgs_gpsSensorField_t gpsData);
++
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* GPS_COLLECTOR_H */
+diff -urN main.c collector_new/main.c
+--- main.c	2017-09-11 10:19:01.133000000 -0500
++++ collector_new/main.c	2017-06-27 13:01:32.059782700 -0500
+@@ -116,6 +116,10 @@
+ #include "board_palna.h"
+ #endif
+ 
++#ifdef GPS_SENSOR
++#include "gps_collector.h"
++#endif
++
+ /******************************************************************************
+  Constants
+  *****************************************************************************/
+@@ -164,7 +168,7 @@
+     { 0 };
+ #endif
+ 
+-#if defined(USE_UART_PRINTF)
++#if defined(USE_UART_PRINTF) && !defined(GPS_SENSOR)
+ UART_Params uartParams;
+ #endif
+ 
+@@ -351,7 +355,7 @@
+     SPI_init();
+ #endif
+ 
+-#if defined(USE_UART_PRINTF)
++#if defined(USE_UART_PRINTF) && !defined(GPS_SENSOR)
+     /* Enable System_printf(..) UART output */
+     UART_init();
+     UART_Params_init(&uartParams);
+@@ -366,6 +370,10 @@
+     taskParams.priority = 1;
+     Task_construct(&myTask, taskFxn, &taskParams, NULL);
+ 
++#ifdef GPS_SENSOR
++    gpsTask_init();
++#endif
++
+ #ifdef DEBUG_SW_TRACE
+     IOCPortConfigureSet(IOID_8, IOC_PORT_RFC_TRC, IOC_STD_OUTPUT
+                     | IOC_CURRENT_4MA | IOC_SLEW_ENABLE);
+diff -urN smsgs.h collector_new/smsgs.h
+--- smsgs.h	2017-09-11 10:19:01.143000000 -0500
++++ collector_new/smsgs.h	2017-06-27 12:31:46.824034100 -0500
+@@ -188,6 +188,8 @@
+ #define SMSGS_SENSOR_LIGHT_LEN 2
+ /*! Length of the humiditySensor portion of the sensor data message */
+ #define SMSGS_SENSOR_HUMIDITY_LEN 4
++/*! Length of the gpsSensor portion of the sensor data message */
++#define SMSGS_SENSOR_GPS_LEN 16
+ /*! Length of the messageStatistics portion of the sensor data message */
+ #define SMSGS_SENSOR_MSG_STATS_LEN 36
+ /*! Length of the configSettings portion of the sensor data message */
+@@ -239,6 +241,8 @@
+     Smsgs_dataFields_msgStats = 0x0008,
+     /*! Config Settings */
+     Smsgs_dataFields_configSettings = 0x0010,
++    /*! GPS Sensor */
++    Smsgs_dataFields_gpsSensor = 0x0020,
+ } Smsgs_dataFields_t;
+ 
+ /*!
+@@ -373,6 +377,41 @@
+ } Smsgs_humiditySensorField_t;
+ 
+ /*!
++ GPS Sensor Field
++ */
++typedef struct _Smsgs_gpssensorfield_t
++{
++    /*! Latitude coordinate from GPS module (Degrees Minutes Format - DM.m) */
++    struct glat_s
++    {
++        int16_t DM;
++        uint32_t m;
++    } lat;
++
++    /*! Longitude coordinate from GPS module (Degrees Minutes Format - DM.m) */
++    struct glng_s
++    {
++        int16_t DM;
++        uint32_t m;
++    } lng;
++
++    /*! Altitude from GPS module (A.a meters) */
++    struct galt_s
++    {
++        uint16_t A;
++        uint8_t a;
++    } alt;
++
++    /*! Time of GPS fix in UTC */
++    struct time_s
++    {
++        uint8_t h;
++        uint8_t m;
++        uint8_t s;
++    } time;
++} Smsgs_gpsSensorField_t;
++
++/*!
+  Message Statistics Field
+  */
+ typedef struct _Smsgs_msgstatsfield_t
+@@ -472,6 +511,11 @@
+      */
+     Smsgs_humiditySensorField_t humiditySensor;
+     /*!
++     GPS Sensor field - valid only if Smsgs_dataFields_gpsSensor
++     is set in frameControl.
++     */
++    Smsgs_gpsSensorField_t gpsSensor;
++    /*!
+      Message Statistics field - valid only if Smsgs_dataFields_msgStats
+      is set in frameControl.
+      */
